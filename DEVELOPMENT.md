@@ -8,6 +8,8 @@ are, what was verified against the KOReader and Mealie sources, and what has
 
 ```
 lardo/
+├── .github/workflows/
+│   └── release.yml      <- "Run workflow" -> tests, version, tag, zip
 ├── lardo.koplugin/      <- this is what goes on the device
 │   ├── _meta.lua        <- name and description, read by PluginLoader
 │   ├── main.lua         <- the plugin: menus, settings, start-up, network
@@ -143,6 +145,37 @@ KOReader has no plugin store of its own, but there are three places users look:
 
 A GitHub release is not required (the AppStore downloads a zipball of the
 default branch), but tagging versions makes it obvious what users are getting.
+
+### Tagging one
+
+*Actions → Release → Run workflow* (`.github/workflows/release.yml`), with a
+version like `1.0.0`. It runs the tests, writes that version into `_meta.lua`,
+commits, tags `v1.0.0` and publishes `lardo.koplugin.zip` as the release asset.
+**Dry run** does all of it except the two pushes — worth using the first time.
+
+Why each of those steps is there, from the AppStore's sources
+(`omer-faruq/appstore.koplugin`):
+
+- It finds repositories with two GitHub searches per kind — `topic:koreader-plugin`
+  and `in:name ".koplugin"` — each run for non-forks and for forks separately.
+  Ours matches both (the repository is *named* `lardo.koplugin`), but the topic
+  is the part that does not depend on the name.
+- **What the store lists is the repository's own metadata** — name, GitHub
+  description, stars, topics, last push. `_meta.lua` is not read until install.
+- Installing offers the release's assets by name, or a zipball. An asset called
+  `<something>.koplugin.zip` is recognised as a plugin directory
+  (`([%w_%-%.]+%.koplugin)%.zip$`), which is why the workflow names it that and
+  zips the directory rather than its contents: the archive has to contain
+  `lardo.koplugin/_meta.lua`.
+- The version is read out of `_meta.lua` **by a text match**
+  (`version%s*=%s*["']([^"']+)["']`), not by running the file, so it has to be a
+  plain string literal — and it has to be in the commit the tag points at, which
+  is why the workflow commits before tagging. Updates themselves work off commit
+  SHAs; the version is what the user sees, and what the changelog compares.
+
+The workflow pushes a commit and a tag with `GITHUB_TOKEN` (`permissions:
+contents: write`), so a branch protection rule that requires pull requests on
+the default branch will stop it.
 
 ## What the plugin stores
 
