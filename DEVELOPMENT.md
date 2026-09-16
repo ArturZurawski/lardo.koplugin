@@ -148,10 +148,17 @@ default branch), but tagging versions makes it obvious what users are getting.
 
 ### Tagging one
 
-*Actions → Release → Run workflow* (`.github/workflows/release.yml`), with a
-version like `1.0.0`. It runs the tests, writes that version into `_meta.lua`,
-commits, tags `v1.0.0` and publishes `lardo.koplugin.zip` as the release asset.
-**Dry run** does all of it except the two pushes — worth using the first time.
+*Actions → Release → Run workflow* (`.github/workflows/release.yml`). It runs the
+tests, writes the version into `_meta.lua`, commits, tags it and publishes
+`lardo.koplugin.zip` as the release asset. **Dry run** does all of that except
+the two pushes — worth using the first time.
+
+**The version field is optional.** Left empty it is the newest `vX.Y.Z` tag with
+one added to the patch number (`v1.2.3` → `v1.2.4`), which is what a release
+usually is; with no version tag at all it starts at `v0.1.0`. Type a version only
+when it is not a patch — a new minor, or a first release you want numbered
+differently. Tags that are not versions are ignored, and the sort is git's
+`-v:refname`, so `v1.10.0` counts as newer than `v1.9.0` rather than older.
 
 Why each of those steps is there, from the AppStore's sources
 (`omer-faruq/appstore.koplugin`):

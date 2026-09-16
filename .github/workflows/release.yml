@@ -1,10 +1,12 @@
 ---
-# Tags a release on request: Actions -> Release -> Run workflow, give it a
-# version. It writes that version into _meta.lua (which is where the AppStore
-# plugin reads it from, by a plain text match on the file), tags the commit,
-# and publishes lardo.koplugin.zip as a release asset -- the shape the AppStore
-# recognises as "a plugin directory", so installing takes the asset rather than
-# a zipball of the whole repository.
+# Tags a release on request: Actions -> Release -> Run workflow. The version is
+# optional -- left empty it is the newest vX.Y.Z tag with one added to the patch
+# number, which is what a release usually is; type one only when it is not (a
+# new minor, a first release). It writes that version into _meta.lua (which is
+# where the AppStore plugin reads it from, by a plain text match on the file),
+# tags the commit, and publishes lardo.koplugin.zip as a release asset -- the
+# shape the AppStore recognises as "a plugin directory", so installing takes the
+# asset rather than a zipball of the whole repository.
 #
 # Nothing is tagged that does not pass the test suite; "dry run" does
 # everything but the pushing, which is how to try it the first time.
@@ -14,8 +16,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release, e.g. 1.0.0 (no leading v)"
-        required: true
+        description: "Version, e.g. 1.2.0 (empty: the last tag, patch + 1)"
+        required: false
         type: string
       notes:
         description: "A line or two for the release notes (optional)"
@@ -41,19 +43,43 @@ jobs:
       # Inputs go through the environment, never into a script through ${{ }}:
       # what someone types into the dispatch form would otherwise be pasted
       # into the shell.
-      - name: Check the version and that it is new
+      - name: Work out the version
+        id: version
         env:
-          VERSION: ${{ inputs.version }}
+          GIVEN: ${{ inputs.version }}
         run: |
           set -eu
-          printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
-              echo "::error::\"$VERSION\" is not a version like 1.2.3" >&2
-              exit 1
-          }
-          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
-              echo "::error::v$VERSION is already tagged" >&2
+          if [ -n "$GIVEN" ]; then
+              printf '%s\n' "$GIVEN" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+                  echo "::error::\"$GIVEN\" is not a version like 1.2.3" >&2
+                  exit 1
+              }
+              version=$GIVEN
+          else
+              # Newest first, by version rather than alphabetically (v10 > v9),
+              # and only tags that are versions -- anything else named v* is not
+              # something to count up from.
+              last=$(git tag --list 'v*' --sort=-v:refname \
+                  | grep -Ex 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)
+              if [ -z "$last" ]; then
+                  version=0.1.0
+                  echo "No version tag yet, starting at v$version"
+              else
+                  rest=${last#v}
+                  major=${rest%%.*}
+                  rest=${rest#*.}
+                  minor=${rest%%.*}
+                  patch=${rest#*.}
+                  version="$major.$minor.$((patch + 1))"
+                  echo "No version given: $last -> v$version"
+              fi
+          fi
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+              echo "::error::v$version is already tagged" >&2
               exit 1
           fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing **v$version**" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install LuaJIT
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends luajit
@@ -66,7 +92,7 @@ jobs:
       # literal -- and it has to be in the commit the tag points at.
       - name: Write the version into _meta.lua
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -eu
           meta=lardo.koplugin/_meta.lua
@@ -90,7 +116,7 @@ jobs:
       - name: Tag it
         if: ${{ !inputs.dry_run }}
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -eu
           git config user.name "github-actions[bot]"
@@ -105,7 +131,7 @@ jobs:
         if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
           NOTES: ${{ inputs.notes }}
         run: |
           set -eu
@@ -124,7 +150,7 @@ jobs:
       - name: What a dry run would have done
         if: ${{ inputs.dry_run }}
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -eu
           echo "Tests pass; v$VERSION would be tagged and released with:"
