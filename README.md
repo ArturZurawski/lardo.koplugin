@@ -133,9 +133,9 @@ A file that came from somewhere else can be pointed at Lardo the usual way: long
 | — | and **a tap beside it**, on the empty strip, opens the menu |
 | Back | clear the filter — and nothing else: Lardo is left through its menu |
 
-The letters used to be KOReader's item shortcuts (press `Q` to open the first row).
-Filtering is worth more than that on a list of recipes — and opening a recipe by
-accidentally brushing a letter key was never a feature.
+The letters are the filter rather than KOReader's item shortcuts (press `Q` to open the
+first row): filtering is worth more than that on a list of recipes, and opening one by
+brushing a letter key is not something anybody asks for.
 
 **On a touch screen, tapping that line turns it into a real field** and
 opens the keyboard under it. The list narrows on every letter, exactly as it does when
@@ -151,8 +151,8 @@ keys should not drop you out of the recipe you are cooking from.
 
 On a **touch screen** the whole screen is recipes: tap one to open it, tap the count at
 the top to filter, tap beside it for the menu, and page with KOReader's own footer. There
-are no buttons of ours anywhere — a row of chrome is a row of recipe, and everything it
-used to carry is one tap away in the menu.
+are no buttons of Lardo's anywhere — a row of chrome is a row of recipe, and everything
+that would be on it is one tap away in the menu.
 
 ### Reading a recipe
 
@@ -177,12 +177,10 @@ filter box, so tapping them does what they are about — and **the empty strip e
 of them opens the menu**.
 
 **The end of that line is a ✕**, and it is the only thing up there that closes the
-recipe. The header used to do both at once with nothing to tell them apart — tap the
-title and what you were cooking from was gone, tap beside it and the menu opened, and the
-two halves looked exactly alike. Now the way out is drawn where a way out is drawn, and
-everything else up there is the menu. On a device with a Back key there is no ✕: the key
-is the way out, and a mark nothing can press is a lie. A long press anywhere is also the
-menu, and *Back to the list* is in it, so a recipe always has a door.
+recipe: the way out is drawn where a way out is drawn, and everything else in the header
+is the menu. On a device with a Back key there is no ✕— the key is the way out, and a
+mark nothing can press is a lie. A long press anywhere is also the menu, and *Back to the
+list* is in it, so a recipe always has a door.
 
 The plain page keys **never** jump to a different recipe — they scroll within the
 current one, moving between its chapters. Switching recipes is on Shift.
@@ -226,7 +224,7 @@ The reading view is deliberately not a `TextViewer`: on a 600×800 screen the fr
 margins, large title bar and buttons cost roughly a quarter of the page. Instead:
 
 ```
-Spaghetti Carbonara                              45 min     <- name + time
+Spaghetti Carbonara                       45 min  75%  ✕    <- name, time, corner, way out
 Description   Ingredients   Instructions   Notes            <- every chapter, always
 ▁▁▁▁▁▁▁▁▁▁▁   ▇▇▇▇▇▃▁▁▁▁▁   ▁▁▁▁▁▁▁▁▁▁▁▁   ▁▁▁▁▁            <- progress, per chapter
 ─────────────────────────────────────────────────────────
@@ -281,11 +279,9 @@ Application settings    ->  Language: Polski
                             Open Lardo instead of the file browser at start-up
 ```
 
-There used to be a menu of Lardo's own, with the same entries in a dialog of its own. It
-was a second menu to keep in step with the one every KOReader user already knows — and
-the settings were never ours to keep twice, since *Tools → Lardo* was built from the same
-definition all along. What is used while cooking sits at the top of that menu, one press
-from the tap that opens it.
+There is no second menu of Lardo's own: one menu is enough to learn, and it is the one
+every KOReader user already knows. What is used while cooking sits at the top of it, one
+press from the tap that opens it.
 
 A category is just its name; **every setting inside it says what it is set to**, because
 an entry that only gives its own name makes you open it to find out where things stand
@@ -362,9 +358,8 @@ a recipe is open.
 The right hand end of a recipe's header shows its cooking time, and after it whatever of
 the device's own state you ask for: **awake** (whether the screen is being kept on) and
 the **battery**, both by default, the **clock**, and whether **Wi-Fi** is on. *Status in
-the corner* opens the same arranging window the buttons use — **drag them into the order you
-want, tick the ones you want**, one window rather than a dialog that closes and reopens
-on every tick:
+the corner* is where they are ticked — the whole line is the target — and *Order…* opens
+a window to **drag them into the order you want**:
 
 ```
 Spaghetti Carbonara                45 min   A  75%
@@ -378,7 +373,9 @@ corner sits next to the recipe's cooking time and a word there reads as part of 
 
 The letter says what is happening rather than what is set: it is there while the nudging
 is actually going on, and **not** while the device is charging, when nothing is nudged
-and the screen will blank on the device's own schedule.
+and the screen will blank on the device's own schedule. Switching *Keep the recipe on
+screen* on brings the letter with it, so there is always something on screen to say that
+it is; take the letter away afterwards and it stays away, whatever interval you pick.
 
 The battery and the clock are refreshed on the same timer as above, so with *Keep the
 recipe on screen* switched off they say what was true when the recipe was opened. **WiFi
@@ -392,9 +389,9 @@ The custom view uses a fair amount of KOReader's widget API, which varies betwee
 versions. If it cannot be built for any reason, the plugin **does not leave a blank
 screen**: it shows the error, with the reason, and stays on the list.
 
-There used to be a fallback here to KOReader's built-in `TextViewer`. It has been
-removed: on a keyboard device its Close button cannot be reached with the 5-way, so a
-recipe opened in it could not be left — a worse failure than the one it was covering.
+There is deliberately no fallback to KOReader's built-in `TextViewer`: on a keyboard
+device its Close button cannot be reached with the 5-way, so a recipe opened in it could
+not be left — a worse failure than the one it would be covering.
 
 ## Language
 
@@ -439,9 +436,9 @@ There is **one** operation, *Refresh*: one (paginated) `GET /api/recipes` for th
 and then one request per recipe that the index says is new or has changed. Afterwards
 everything is readable with the Wi-Fi off.
 
-(It used to be two entries, *Refresh list* and *Sync all recipes for offline use*. The
-distinction was not worth a menu line: the index is what tells you what to fetch, and a
-recipe is a few kilobytes of text.)
+(One entry, not two: the index is what tells you what to fetch, and a recipe is a few
+kilobytes of text, so "refresh the list" and "download what is missing" are not worth
+separating.)
 
 Mealie returns an `updatedAt` field for every recipe in the index, so that one cheap
 request is enough to work out the difference locally, without asking the server about
@@ -458,11 +455,11 @@ So the first refresh downloads everything and every later one costs only what ac
 changed — usually a single request for the index and nothing else. Downloading can be
 interrupted with any key and resumed later; progress is not lost.
 
-While it runs there is **one message with a counter on it**, and no recipe names: the
-message used to be redrawn for every recipe, and that was the slow part of a sync. Each
-redraw is an e-ink refresh plus the 100 ms KOReader waits to see whether the message was
-tapped away — more time than the few kilobytes of JSON it was announcing. The counter now
-moves at most once a second (which is also how often a cancel is noticed), and what the
+While it runs there is **one message with a counter on it**, and no recipe names: naming
+each one means redrawing the message for each one, and every redraw is an e-ink refresh
+plus the 100 ms KOReader waits to see whether the message was tapped away — more time
+than the few kilobytes of JSON it announces. The counter moves at most once a second
+(which is also how often a cancel is noticed), and what the
 refresh actually did is said once, at the end.
 
 Independently of that, **opening a recipe** checks `updatedAt`: if the stored copy is
@@ -481,10 +478,10 @@ downloaded, a recipe is not fetched again until you clear the cache.
 in `lardo_cache.lua`: the recipe list as the server sent it, and one line per stored
 recipe saying which version of it is on the device.
 
-They all used to be one key in that index file, which meant KOReader parsed every recipe
-you had ever downloaded at start-up and kept the lot in memory for as long as it ran — in
+Keeping them all in that one index file would mean KOReader parsing every recipe you had
+ever downloaded at start-up and holding the lot in memory for as long as it ran — in
 order to draw a list of names. For 300 recipes that is ~1.7 MB of Lua against ~190 kB for
-the index, and a Kindle Keyboard has 256 MB for everything it does. Now the list is drawn
+the index, and a Kindle Keyboard has 256 MB for everything it does. So the list is drawn
 from the index, "is my copy still current?" is answered by the stamp, and **the recipe
 itself is read when you open it** and let go of when you close it. An existing cache is
 moved into the new shape once, the first time the plugin starts after the update; nothing
