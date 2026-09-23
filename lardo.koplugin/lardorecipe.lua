@@ -204,6 +204,41 @@ function Recipe.listMandatory(recipe)
     return ""
 end
 
+--- The tags, shortened to what a row of the list can spare for them.
+--
+-- A row is 600 px of a Kindle Keyboard and the name has the first claim on it,
+-- so this is deliberately mean: tags while they fit a small budget, and an
+-- ellipsis for the rest. The first one is always shown, however long it is --
+-- one long tag is still what this recipe is, and a row reading only "…" would
+-- tell you nothing. Whole tags only: cutting one in half would cut a Polish
+-- letter in half with it.
+local LIST_TAG_BUDGET = 20 -- bytes, so about eighteen accented characters
+function Recipe.listTags(recipe)
+    local tags = recipe.tags or {} -- nil in a list cached before tags were kept
+    if #tags == 0 then return "" end
+    local shown, width = {}, 0
+    for i = 1, #tags do
+        local extra = #tags[i] + (#shown > 0 and 2 or 0) -- ", "
+        if #shown > 0 and width + extra > LIST_TAG_BUDGET then break end
+        shown[#shown + 1] = tags[i]
+        width = width + extra
+    end
+    local text = table.concat(shown, ", ")
+    if #shown < #tags then text = text .. " …" end
+    return text
+end
+
+--- The whole right-hand column of a row: what the recipe is, then how long it
+-- takes. The time is last so that it ends at the right edge, where the eye
+-- going down the list looks for it.
+function Recipe.listColumn(recipe, with_tags)
+    local time = Recipe.listMandatory(recipe)
+    local tags = with_tags and Recipe.listTags(recipe) or ""
+    if tags == "" then return time end
+    if time == "" then return tags end
+    return tags .. " · " .. time
+end
+
 --- Compact summary for the view header: the one number worth seeing while
 -- you are reading the instructions.
 function Recipe.headerMeta(recipe)

@@ -5,9 +5,9 @@ Deliberately not a TextViewer: on a 600x800 screen the framed, inset dialog
 with its big title bar and button row costs roughly a quarter of the page. This
 widget paints edge to edge and spends its chrome on one compact header line
 (recipe name + time) plus, when a recipe has several chapters, a second line
-with the chapter name and position. The button row follows the device (shown on a
-touch screen, hidden where there are keys for the same things), and the reading
-position is a hairline bar rather than a row of text.
+with the chapter name and position. The reading position is a hairline bar
+rather than a row of text, and there are no buttons at all: the header is the
+menu, the keys and the swipes are the reading.
 
 Description, ingredients, instructions and notes are separate chapters, so you
 can jump to the one you need instead of scrolling past the other three.
@@ -16,7 +16,6 @@ can jump to the one you need instead of scrolling past the other three.
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local ButtonTable = require("ui/widget/buttontable")
 local Device = require("device")
 local FocusManager = require("ui/widget/focusmanager")
 local Font = require("ui/font")
@@ -34,7 +33,10 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Widget = require("ui/widget/widget")
 local Screen = Device.screen
-local _ = require("lardoi18n").gettext
+
+-- The way out of a recipe, at the end of the header line: the mark every other
+-- screen uses for it, where every other screen keeps it.
+local CLOSE_MARK = "✕"
 
 --- A hairline reading-position bar.
 -- With `segments` it draws one span per chapter, each filling on its own, and
@@ -94,7 +96,8 @@ local LardoView = FocusManager:extend{
     font_size = 20,
     font_face = nil,      -- font file path from FontChooser; nil = KOReader's UI font
     progress_position = "top", -- "top" | "bottom" | "side" | "off"
-    show_buttons = false,
+    -- the device's own state, in the corner: battery, clock, WiFi (main.lua)
+    status_text = "",
     -- callbacks
     close_callback = nil,
     next_recipe_callback = nil,
@@ -142,13 +145,12 @@ end
 function LardoView:registerKeyEvents()
     if not Device:hasKeys() then return end
 
-    -- Up/Down scroll the text instead of moving focus. With no buttons on
-    -- screen there is nothing to focus at all, so we claim the rest too.
-    self:dropFocusKeys("FocusUp", "FocusDown", "HalfFocusUp", "HalfFocusDown", "Home")
-    if not self.show_buttons then
-        self:dropFocusKeys("FocusLeft", "FocusRight", "HalfFocusLeft", "HalfFocusRight",
-            "Press", "FocusNext", "FocusPrevious")
-    end
+    -- There is nothing on this screen to move a focus between: Up and Down
+    -- scroll the text, Left and Right change chapter, and the rest is the
+    -- recipe. So the focus keys are all ours.
+    self:dropFocusKeys("FocusUp", "FocusDown", "HalfFocusUp", "HalfFocusDown", "Home",
+        "FocusLeft", "FocusRight", "HalfFocusLeft", "HalfFocusRight",
+        "Press", "FocusNext", "FocusPrevious")
 
     self.key_events.Close = { { Device.input.group.Back } }
     self.key_events.LardoShowMenu = { { "Menu" } }
@@ -157,8 +159,7 @@ function LardoView:registerKeyEvents()
     self.key_events.LardoLineDown = { { "Down" }, event = "LardoScrollLine", args = 1 }
     self.key_events.LardoLineUp = { { "Up" }, event = "LardoScrollLine", args = -1 }
 
-    if #self.chapters > 1 and not self.show_buttons then
-        -- with buttons on screen Left/Right belong to the button row
+    if #self.chapters > 1 then
         self.key_events.LardoChapterNext = { { "Right" }, event = "LardoChapter", args = "next" }
         self.key_events.LardoChapterPrev = { { "Left" }, event = "LardoChapter", args = "previous" }
     end
@@ -182,12 +183,8 @@ end
 --==========================================================================
 
 --- The same reading model as the keys, with a finger: the page turns where a
--- book's page turns, the chapters are where they are drawn, and the header is
--- the one piece of chrome you can hit to get out or to the menu.
---
--- The header strip is split at the meta text on the right (the total time),
--- because that corner is the only part of the header that is never a chapter
--- name: tapping it opens the menu, the rest of the strip leaves the recipe.
+-- book's page turns, and the chapters swipe. Everything that is not reading --
+-- the menu, and through it the way back -- is the header, or a long press.
 function LardoView:registerTouchEvents()
     if not Device:isTouchDevice() then return end
     local screen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
@@ -198,23 +195,40 @@ function LardoView:registerTouchEvents()
     self.ges_events.LardoHold = { GestureRange:new{ ges = "hold", range = screen } }
 end
 
---- @return "header", "back" (the left third of the body) or "forward"
+--- @return "close", "header", "back" (the left third of the body) or "forward"
 function LardoView:tapZone(pos)
     if not pos then return "forward" end
     if self.header_height and pos.y <= self.header_height then
+        local zone = self.close_zone
+        if zone and pos.y <= zone.to_y and pos.x >= zone.from_x then
+            return "close"
+        end
         return "header"
     end
     return pos.x < Screen:getWidth() / 3 and "back" or "forward"
 end
 
+--- The header is the menu, and nothing else.
+--
+-- It used to be two things at once: the way out (tap the title) and the way to
+-- the menu (tap the right hand end, where the total time is). That reads well in
+-- a README and badly in a kitchen -- the two halves look identical, one of them
+-- throws away the recipe you are cooking from, and neither says so. The way out
+-- is in the menu, which is where a way out belongs.
+--
+-- The menu half came back, because the top of the screen is where KOReader
+-- itself keeps its menu and a full-screen widget of ours is the only reason
+-- that tap does not land. Nothing up there destroys anything, so the whole
+-- strip does the one harmless thing, and it is the thing the habit expects.
 function LardoView:onLardoTap(_arg, ges)
     local zone = self:tapZone(ges and ges.pos)
-    if zone == "header" then
-        -- right hand end of the header: the menu; the rest: back to the list
-        if ges and ges.pos and ges.pos.x > Screen:getWidth() * 2 / 3 then
-            return self:onLardoShowMenu()
-        end
+    if zone == "close" then
         return self:onClose()
+    end
+    if zone == "header" then
+        -- the top of the screen is where KOReader's own menu lives, and a
+        -- full-screen widget of ours is what stops that tap reaching it
+        return self:onLardoShowMenu()
     end
     return self:onLardoScrollPage(zone == "back" and -1 or 1)
 end
@@ -279,7 +293,7 @@ local function headerRow(screen_w, h_padding, left_text, right_text, left_face, 
         table.insert(row, right_widget)
     end
     table.insert(row, HorizontalSpan:new{ width = h_padding })
-    return row
+    return row, right_widget
 end
 
 --- Font sizes tried for the chapter row, largest first.
@@ -339,8 +353,32 @@ function LardoView:buildHeader(screen_w, h_padding)
     local small_pad = Size.padding.small
     local header = VerticalGroup:new{ align = "left" }
     table.insert(header, VerticalSpan:new{ width = small_pad })
-    table.insert(header, headerRow(screen_w, h_padding, self.title, self.meta,
-        Font:getFace("tfont", HEADER_TITLE_SIZE), Font:getFace("cfont", HEADER_LINE_SIZE), true))
+    local right_text = self.meta or ""
+    if self.status_text and self.status_text ~= "" then
+        right_text = (right_text ~= "" and (right_text .. "   ") or "") .. self.status_text
+    end
+    local right_face = Font:getFace("cfont", HEADER_LINE_SIZE)
+    -- The way out, on the screen rather than two presses into the menu. Only
+    -- where there is a finger: a keyboard device leaves with the Back key, and
+    -- a mark nothing can be pressed with is a lie.
+    self.close_zone = nil
+    if Device:isTouchDevice() then
+        local mark = TextWidget:new{ text = CLOSE_MARK, face = right_face }
+        local mark_w = mark:getSize().w
+        mark:free()
+        right_text = (right_text ~= "" and (right_text .. "   ") or "") .. CLOSE_MARK
+        -- a finger is wider than the glyph: the zone starts a padding early and
+        -- runs to the edge of the screen
+        self.close_zone = { from_x = screen_w - 2 * h_padding - mark_w }
+    end
+    local header_row, right_widget = headerRow(screen_w, h_padding, self.title, right_text,
+        Font:getFace("tfont", HEADER_TITLE_SIZE), right_face, true)
+    self.header_right_widget = right_widget
+    if self.close_zone then
+        -- the first row only: the chapter names below it are not a way out
+        self.close_zone.to_y = small_pad + header_row:getSize().h
+    end
+    table.insert(header, header_row)
 
     self.chapter_spans = nil
     if #self.chapters > 1 then
@@ -351,34 +389,6 @@ function LardoView:buildHeader(screen_w, h_padding)
     end
     table.insert(header, VerticalSpan:new{ width = small_pad })
     return header
-end
-
-function LardoView:buildButtonRow()
-    local row = {}
-    local ingredients = self:findChapter("ingredients")
-    if ingredients then
-        local on_ingredients = ingredients == self.chapter_index
-        table.insert(row, {
-            text = (on_ingredients and self.ingredients_return) and _("Back")
-                or self.chapters[ingredients].title,
-            callback = function() self:onLardoIngredients() end,
-        })
-    end
-    if #self.chapters > 1 then
-        table.insert(row, {
-            text = "<",
-            callback = function() self:onLardoChapter("previous") end,
-        })
-        table.insert(row, {
-            text = ">",
-            callback = function() self:onLardoChapter("next") end,
-        })
-    end
-    table.insert(row, {
-        text = _("Close"),
-        callback = function() self:onClose() end,
-    })
-    return row
 end
 
 function LardoView:buildLayout()
@@ -394,20 +404,7 @@ function LardoView:buildLayout()
     -- also fills in self.chapter_spans, which the segmented bar lines up with
     local header = self:buildHeader(screen_w, h_padding)
 
-    local buttons_h = 0
-    self.button_table = nil
-    if self.show_buttons then
-        self.button_table = ButtonTable:new{
-            width = screen_w,
-            buttons = { self:buildButtonRow() },
-            zero_sep = true,
-            show_parent = self,
-        }
-        buttons_h = self.button_table:getSize().h
-        self.layout = self.button_table.layout
-    else
-        self.layout = nil
-    end
+    self.layout = nil -- nothing on this screen takes a focus
 
     self.progress_line = nil
     local bar_h, side_bar_w = 0, 0
@@ -433,9 +430,11 @@ function LardoView:buildLayout()
         dimen = Geom:new{ w = screen_w, h = Size.line.thin },
     })
     local header_h = header_group:getSize().h
-    self.header_height = header_h -- the touch zone that is chrome rather than text
+    -- everything above the text is chrome, and a tap up there is the menu
+    -- rather than a page turn
+    self.header_height = header_h
 
-    local body_h = screen_h - header_h - buttons_h - (self.progress_position == "bottom" and bar_h or 0)
+    local body_h = screen_h - header_h - (self.progress_position == "bottom" and bar_h or 0)
     -- the side bar sits flush against the screen edge, with the padding
     -- between it and the text rather than behind it
     local text_w = screen_w - 2 * h_padding - side_bar_w
@@ -465,13 +464,10 @@ function LardoView:buildLayout()
     local main = VerticalGroup:new{ align = "left" }
     table.insert(main, header_group)
     table.insert(main, body)
-    local filler = screen_h - header_h - body:getSize().h - buttons_h
+    local filler = screen_h - header_h - body:getSize().h
         - (self.progress_position == "bottom" and bar_h or 0)
     if filler > 0 then
         table.insert(main, VerticalSpan:new{ width = filler })
-    end
-    if self.button_table then
-        table.insert(main, self.button_table)
     end
     if self.progress_position == "bottom" and self.progress_line then
         table.insert(main, self.progress_line)
@@ -523,6 +519,19 @@ function LardoView:updateProgress()
     end
 end
 
+--- The corner of the header, redrawn: the battery moves, the clock certainly
+-- does. Called from the plugin's keep-awake tick, so a recipe left open shows
+-- what is true rather than what was true when it was opened.
+function LardoView:setStatus(text)
+    text = text or ""
+    if text == self.status_text then return end
+    self.status_text = text
+    -- The title is laid out against whatever is in the corner, so this is a
+    -- rebuild rather than a setText -- and on the device it is the one repaint
+    -- every few minutes that says the screen is still ours.
+    self:rebuild(self.text_widget and self.text_widget.virtual_line_num or nil)
+end
+
 function LardoView:refresh()
     self:updateProgress()
     UIManager:setDirty(self, function()
@@ -533,7 +542,7 @@ end
 --- Rebuilds for a new chapter, font or setting.
 -- @param scroll_to "bottom" to land on the last page (page-back into a chapter)
 -- Key bindings do not depend on the current chapter, so they are set up once
--- in init(); changing buttons or fonts reopens the view instead.
+-- in init(); changing a font reopens the view instead.
 --- @param scroll_to "bottom" for the last page, or a line number to return to
 function LardoView:rebuild(scroll_to)
     self:buildLayout()

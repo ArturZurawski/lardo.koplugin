@@ -1,7 +1,9 @@
-local NetworkMgr = { online = true, connected = true, after_action_count = 0,
+local NetworkMgr = { online = true, wifi_on = true, after_action_count = 0,
     when_online_count = 0, when_connected_count = 0 }
 function NetworkMgr:isOnline() return self.online end
-function NetworkMgr:isConnected() return self.connected end
+-- the radio itself, which is what the corner of a recipe follows: it can be on
+-- with nothing reachable, and that is still "WiFi is on"
+function NetworkMgr:isWifiOn() return self.wifi_on end
 -- KOReader drops the callback in runWhenOnline() when the link is up but its
 -- DNS check is not; runWhenConnected() always runs it.
 function NetworkMgr:runWhenOnline(cb)

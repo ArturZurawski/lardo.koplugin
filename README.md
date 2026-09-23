@@ -20,8 +20,9 @@ KOReader's start-up screen**.
 - Recipes are stored on the device, so once downloaded everything works **without Wi-Fi**.
 - The server address and API token go into a **plain text file over USB** — no typing a
   200-character JWT on a Kindle keyboard.
-- **Type to filter** by name and description, with the whole screen still on recipes:
-  the list has one line of chrome, and it is the recipe count or what you have typed.
+- **Type to filter** by name, description and **tags**, with the whole screen still on
+  recipes: the list has one line of chrome, and it is the recipe count or what you have
+  typed. The tags are on the rows as well, next to the time.
 
 ## Installation
 
@@ -96,6 +97,23 @@ Two equivalent places:
 KOReader then opens the recipe list straight away. *Menu → Close Lardo* closes the list
 and reveals the normal file browser underneath — the device is still an e-reader.
 
+## A "book" in the library that opens Lardo
+
+Besides *Start with* and the Tools menu, Lardo can put **a file in your library that
+opens it**: *Menu → Application settings → Shortcut in the library* writes
+`Lardo.lardo` into a folder of your choosing (the one you are looking at, unless you
+pick another). Tap it like a book and the recipe list opens. The same entry says where it
+is, moves it — the file follows the folder — and takes it away again.
+
+It is not a trick: KOReader has a mechanism for exactly this — an *auxiliary provider*,
+a plugin that opens a file instead of a document engine, the way its text editor and
+archive viewer do. The file itself holds one line of text that nobody reads; `.lardo` is
+registered as a file type of ours, which is both what sends the tap here and what makes
+the file browser list the file at all (it only shows files it knows an opener for).
+
+A file that came from somewhere else can be pointed at Lardo the usual way: long press →
+*Open with…* → Lardo, and tick "always use for this file".
+
 ## Key and touch reference
 
 ### Recipe list
@@ -111,20 +129,30 @@ and reveals the normal file browser underneath — the device is still an e-read
 | Shift + Next/Prev Page | last / first page |
 | Shift + down | go to a page number |
 | **Menu** | actions: filter, sort, refresh, settings, close Lardo |
+| — | on a touch screen, **a tap on the count at the top** starts the filter |
+| — | and **a tap beside it**, on the empty strip, opens the menu |
 | Back | clear the filter — and nothing else: Lardo is left through its menu |
 
 The letters used to be KOReader's item shortcuts (press `Q` to open the first row).
 Filtering is worth more than that on a list of recipes — and opening a recipe by
-accidentally brushing a letter key was never a feature. *Menu → Filter recipes* opens
-the same box (on a device with no keyboard it opens an input dialog, the only way to
-type there).
+accidentally brushing a letter key was never a feature.
+
+**On a touch screen, tapping that line turns it into a real field** and
+opens the keyboard under it. The list narrows on every letter, exactly as it does when
+typing on a keyboard device — there is nothing to confirm. It is put away by `⏎`, by
+backspacing when there is nothing left to delete, or by **a tap anywhere else**: with the
+keyboard up there is nothing else to do on this screen, so nothing else has to be aimed
+at. The line then says what the list is filtered by. *Back* clears the filter
+altogether.
 
 **Back never leaves Lardo.** It clears the filter, and with no filter it does nothing;
 the way out is *Menu → Close Lardo*. A key that is one thumb-slip away from the page
 keys should not drop you out of the recipe you are cooking from.
 
-On a **touch screen**: tap a recipe to open it, tap ☰ for the same menu, and the ✕ in
-the title bar closes Lardo (that one is a deliberate tap, so it does what it says).
+On a **touch screen** the whole screen is recipes: tap one to open it, tap the count at
+the top to filter, tap beside it for the menu, and page with KOReader's own footer. There
+are no buttons of ours anywhere — a row of chrome is a row of recipe, and everything it
+used to carry is one tap away in the menu.
 
 ### Reading a recipe
 
@@ -136,14 +164,25 @@ the title bar closes Lardo (that one is a deliberate tap, so it does what it say
 | **S** | — | jump to the ingredients; **press S again to return exactly where you were** |
 | **1 … 9** | — | jump to the chapter with that number |
 | **Shift + Next/Prev Page** | — | previous / next **recipe** from the list |
-| Menu | long press anywhere, or tap the right end of the header | view options: font size and typeface, position bar, button row |
-| Back | tap the header (left of the time) | back to the list |
+| Menu | a tap on the header, or a long press anywhere | the menu: fonts, position bar, and the way back |
+| Back | the **✕** at the end of the header | back to the list |
 
-The header is the only chrome the reading view has, so it is also the only thing a tap
-can hit that is not text: its right hand end (where the total time is) opens the menu,
-the rest of it goes back to the list. On a touch screen the **button row is shown by
-default** — it does the same things with labels on them — and can be turned off in
-*View* for a full page of recipe.
+**Tapping the top of the screen opens the menu.** That is where KOReader keeps its own
+menu on every screen, and the only reason the habit stops working here is that Lardo
+covers the screen and so covers KOReader's touch zone.
+
+On the recipe list the top is the one line of chrome, and it is split in two: **the words
+start the filter** — they are the recipe count, and while you are typing they are the
+filter box, so tapping them does what they are about — and **the empty strip either side
+of them opens the menu**.
+
+**The end of that line is a ✕**, and it is the only thing up there that closes the
+recipe. The header used to do both at once with nothing to tell them apart — tap the
+title and what you were cooking from was gone, tap beside it and the menu opened, and the
+two halves looked exactly alike. Now the way out is drawn where a way out is drawn, and
+everything else up there is the menu. On a device with a Back key there is no ✕: the key
+is the way out, and a mark nothing can press is a lie. A long press anywhere is also the
+menu, and *Back to the list* is in it, so a recipe always has a door.
 
 The plain page keys **never** jump to a different recipe — they scroll within the
 current one, moving between its chapters. Switching recipes is on Shift.
@@ -156,14 +195,26 @@ ingredients*), so it can be bound to any key with the **Hotkeys** plugin.
 The recipe list is one line of chrome and then recipes:
 
 ```
-☰   12 recipes in Mealie                                 <- idle: what there is
-☰   Filter: pan_   2/12                                  <- typing: what is left
-    ★ Pancakes                                   20 min  <- a favourite in Mealie
-    Pancake sauce                                 5 min
+    12 recipes in Mealie                                 <- idle: what there is
+    Filter: pan_   2/12                                  <- typing: what is left
+    ★ Pancakes                  śniadanie · 20 min       <- a favourite in Mealie
+    Pancake sauce                słodkie ·  5 min
+    ...
 ```
 
-No second line repeating the plugin name, no hint about the Menu key — the ☰ is
-already there, and a line of the list is a recipe.
+No second line repeating the plugin name, no hint about the Menu key, no row of buttons —
+a line of the list is a recipe. The title bar has no icons in it at all: that one line is
+the filter box and the way to the menu, and everything else is what you came for.
+
+**The right-hand column is the tags, then the time.** On a list of three hundred
+recipes the tags are most of what tells two chicken dishes apart, so they are shown by
+default — *Screen → Tags on the recipe list* turns them off. The column gives way to the
+name rather than the other way round: the tags that fit, and `…` for the rest.
+
+**Filtering reads the tags too**, whether or not the column shows them: typing `zupa`
+finds everything tagged *zupa* as well as everything with it in the name or the
+description. What the column has room for is a question about the width of the screen;
+what you typed is a question about what you meant.
 
 **Sorting** is in the same menu (*Menu → Sort by*): by name, newest first (Mealie's
 `dateAdded`), recently changed (`updatedAt`), or favourites first. Favourites belong to
@@ -172,7 +223,7 @@ the user rather than to the recipe, so they come from `/api/users/self` plus
 simply shows no stars.
 
 The reading view is deliberately not a `TextViewer`: on a 600×800 screen the frame,
-margins, large title bar and button row cost roughly a quarter of the page. Instead:
+margins, large title bar and buttons cost roughly a quarter of the page. Instead:
 
 ```
 Spaghetti Carbonara                              45 min     <- name + time
@@ -191,23 +242,149 @@ Description   Ingredients   Instructions   Notes            <- every chapter, al
   chapters already read stay filled, untouched ones stay empty. By default it sits
   under the chapter names; it can be moved to the bottom edge, to the right edge
   (vertical, flush against the screen, showing the whole recipe) or hidden.
-- **The button row at the bottom follows the device** (*View → Button row at the bottom*):
-  shown on a touch screen, where it is the only visible way around, hidden on a keyboard
-  device, where every button has a key of its own. It costs height either way.
-- **Font size** 12–40 (in the recipe menu: `A −` `20` `A +`, the middle one opens a
-  picker) and **typeface** from every font KOReader knows about. Both settings are
+- **Font size** 12–40 and **typeface** from every font KOReader knows about, both under
+  *Screen → Fonts*. Both settings are
   **global** — chosen once they apply to every recipe, to the **recipe list** as well,
   and survive a restart. A larger font gives the list fewer, taller rows, because a
   `Menu` row caps its text to the row height. The header stays in the interface font so
   that its height is predictable and it cannot break on a typeface missing some glyphs.
-- The same settings appear in two places, and they are one set: *Tools → Lardo →
-  View*, and the **Menu** key while reading a recipe (or *Lardo settings → View and
-  font* from the list). Each entry shows its current value, so nothing has to be opened
-  to see how things stand.
+- The same settings appear wherever the menu does — *Tools → Lardo*, the recipe list's
+  menu, an open recipe's — and they are one set, defined once. Each entry shows its
+  current value, so nothing has to be opened to see how things stand.
 - The font list is a plain KOReader menu, not `FontChooser`: 5-way down walks through
   the pages, with no buttons to hunt for below the list. **Every entry is drawn in the
   font it offers**, so you can see what you are choosing, and selecting one applies it
   immediately.
+
+### The menu
+
+**There is one menu, and it is KOReader's own.** A tap on the top of either screen (and
+the Menu key) opens it; everything Lardo has is under *Tools → Lardo*:
+
+```
+Browse recipes
+Back to the list                 <- grey unless a recipe is open
+Close Lardo                      <- grey unless the list is open
+Filter: none                     <- grey unless the list is open
+Clear the filter
+Sort by: Name
+Refresh (last: 2026-09-20 14:20)
+Screen                  ->  Fonts: 20 pt, Alpha Regular
+                            Reading position bar: Under the chapters
+                            Keep the recipe on screen: Every 10 minutes
+                            Status in the corner: Awake, Battery
+Connection              ->  Server address: http://mealie.lan:9000
+                            Log in · API token: set · Test connection · lardo.conf
+Application settings    ->  Language: Polski
+                            Offline: 42 recipes stored
+                            Shortcut in the library: none
+                            Open Lardo instead of the file browser at start-up
+```
+
+There used to be a menu of Lardo's own, with the same entries in a dialog of its own. It
+was a second menu to keep in step with the one every KOReader user already knows — and
+the settings were never ours to keep twice, since *Tools → Lardo* was built from the same
+definition all along. What is used while cooking sits at the top of that menu, one press
+from the tap that opens it.
+
+A category is just its name; **every setting inside it says what it is set to**, because
+an entry that only gives its own name makes you open it to find out where things stand
+and then close it again, and on a screen that takes half a second to redraw that is the
+whole interaction.
+
+#### A tab of its own
+
+*Application settings → **Own tab in KOReader's menu*** puts Lardo in the menu's top row,
+with an icon of its own, and **the menu then opens straight into it** — rather than three
+presses away under *Tools → More tools → Lardo*.
+
+It is off to begin with, because that row is KOReader's and a tab is a loud thing to add
+to it uninvited. The row is not hardcoded, though: it is a table (`KOMenu:menu_buttons` in
+`ui/elements/filemanager_menu_order`) that every caller shares, so a plugin can add a tab
+the same way KOReader adds its own. Ours goes at the end, so the tab indices KOReader
+remembers do not shift, and switching it off takes it back out.
+
+**A menu customiser overrules it.** If something on your device writes
+`settings/filemanager_menu_order.lua` — that is what a menu-customising plugin does —
+KOReader replaces the row of tabs with the saved one *after* every plugin has added its
+entries, so the tab cannot be there. Lardo reads that file before it asks for anything
+and does not claim a tab it cannot keep — which would cost it the entry under *Tools* as
+well. And whenever the tab is asked for and the built menu turns out not to have it,
+Lardo says so once and names the file if there is one, rather than leaving a switch that
+can be turned on and then does nothing. To have the tab on such a device, add Lardo in
+the plugin that decides the menu's layout, or remove what it wrote.
+
+The same file can hide Lardo **altogether**: ids listed in its `KOMenu:disabled` are
+deleted before KOReader sorts the menu, and Lardo's entry and its tab share one id, so
+one line there removes both — nothing in *Tools*, nothing in *More tools*, and ticking
+the tab does nothing either. If that has happened, Lardo says so the first time you open
+the menu and names the file; switch Lardo back on in the plugin that wrote it, or delete
+the file. Meanwhile the recipes are still reachable: *Start with*, and the shortcut in
+the library.
+
+Entries that need a screen of ours are **disabled rather than missing** — *Back to the
+list* is there and grey until there is a list to go back to. A menu whose entries move
+around is harder to learn than one whose entries grey out.
+
+### Keeping the recipe on screen
+
+A Kindle blanks the screen ten minutes after the last thing **its firmware** counts as
+activity, and there is no setting for it on the device. KOReader reads the keys straight
+off the event devices, so as far as the Kindle is concerned a recipe being read is a
+device nobody has touched — which is how you end up wiping your hands to press a key.
+
+*Keep the recipe on screen* (in the recipe's menu, and in *Tools → Lardo*) says
+otherwise. While a recipe is open it tells the device's power daemon that the screensaver
+timer should start again — **every four minutes**, which is KOReader's own figure for the
+same job and lower than the shortest screensaver any Kindle has. It also holds off
+KOReader's own auto-suspend, which is a separate clock.
+
+The setting (**10 minutes** by default — or 5, 15, 30, or off) is how often the **corner
+of the header** is redrawn while that is going on, so the battery and the clock up there
+are true rather than however they were when you opened the recipe. The two are separate
+on purpose: an e-ink refresh every four minutes to move a clock by four minutes is more
+flicker than anybody wants, and a device that blanks after five is not going to wait ten.
+
+Two things about it worth knowing:
+
+- **Nothing is left switched on behind you.** This is a nudge repeated while the recipe
+  is open, not a flag: close the recipe and ten minutes later the Kindle does what it
+  always did. (The other way — `preventScreenSaver 1` — is a switch you can leave a
+  device stuck with if KOReader goes away without clearing it.)
+- **It does not nudge while charging**, where the reset causes trouble of its own, and
+  where a screen left on is not going to cost you the battery anyway.
+
+KOReader's own sleep is a separate clock, and it is held off the same way for as long as
+a recipe is open.
+
+### Status in the corner
+
+The right hand end of a recipe's header shows its cooking time, and after it whatever of
+the device's own state you ask for: **awake** (whether the screen is being kept on) and
+the **battery**, both by default, the **clock**, and whether **Wi-Fi** is on. *Status in
+the corner* opens the same arranging window the buttons use — **drag them into the order you
+want, tick the ones you want**, one window rather than a dialog that closes and reopens
+on every tick:
+
+```
+Spaghetti Carbonara                45 min   A  75%
+```
+
+Plain text — `+75%` while charging, and a single `A` (for *awake*; `C` in Polish, for
+*czuwa*) while the screensaver is being held off — rather than KOReader's battery glyphs,
+which come from an icon font a Kindle Keyboard may not have: a percentage nobody can
+misread beats a box where a symbol should be. One letter rather than a word, because the
+corner sits next to the recipe's cooking time and a word there reads as part of it.
+
+The letter says what is happening rather than what is set: it is there while the nudging
+is actually going on, and **not** while the device is charging, when nothing is nudged
+and the screen will blank on the device's own schedule.
+
+The battery and the clock are refreshed on the same timer as above, so with *Keep the
+recipe on screen* switched off they say what was true when the recipe was opened. **WiFi
+does not wait for that**: KOReader says when the radio goes up or down, and the corner
+follows it — a refresh that hangs the radio up afterwards would otherwise leave the mark
+sitting there for another ten minutes.
 
 ### When the view cannot be built
 

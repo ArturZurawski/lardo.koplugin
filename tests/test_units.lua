@@ -108,6 +108,39 @@ check(summary.name == "Soup", "summary name")
 check(Recipe.listMandatory(summary) == "45 min", "mandatory column uses total time")
 check(Recipe.listMandatory(Recipe.normalizeSummary({ slug = "x", name = "X" })) == "",
     "mandatory column empty when no times")
+
+-- the right-hand column: what the recipe is, then how long it takes
+local tagged = Recipe.normalizeSummary({
+    slug = "soup", name = "Soup", totalTime = "45 min",
+    tags = { { name = "obiad" }, { name = "zupa" } },
+})
+check(Recipe.listTags(tagged) == "obiad, zupa", "the tags read as one phrase",
+    Recipe.listTags(tagged))
+check(Recipe.listColumn(tagged, true) == "obiad, zupa · 45 min",
+    "and the time stays at the right edge, after them", Recipe.listColumn(tagged, true))
+check(Recipe.listColumn(tagged, false) == "45 min",
+    "with the tags switched off the column is the time alone", Recipe.listColumn(tagged, false))
+check(Recipe.listColumn(summary, true) == "45 min",
+    "an untagged recipe does not gain a separator with nothing before it",
+    Recipe.listColumn(summary, true))
+check(Recipe.listColumn(Recipe.normalizeSummary({
+    slug = "t", name = "T", tags = { { name = "obiad" } } }), true) == "obiad",
+    "nor a tagged one with no time in it")
+
+-- the name has the first claim on a 600 px row, so the column gives way
+local many_tags = Recipe.normalizeSummary({ slug = "m", name = "M", tags = {
+    { name = "obiad" }, { name = "wegetariańskie" }, { name = "szybkie" } } })
+check(Recipe.listTags(many_tags) == "obiad …",
+    "tags that do not fit are counted, not crammed in", Recipe.listTags(many_tags))
+local one_long = Recipe.normalizeSummary({ slug = "l", name = "L",
+    tags = { { name = "dania jednogarnkowe z piekarnika" } } })
+check(Recipe.listTags(one_long) == "dania jednogarnkowe z piekarnika",
+    "the first tag is shown however long it is -- a row reading only \"…\" says nothing",
+    Recipe.listTags(one_long))
+check(Recipe.listTags({}) == "" and Recipe.listColumn({ total_time = "", perform_time = "",
+    cook_time = "", prep_time = "" }, true) == "",
+    "a list cached before tags were kept has none, and asks for nothing")
+
 check(Recipe.normalizeSummary({ name = "no slug" }) == nil, "entries without slug/id are dropped")
 check(Recipe.normalizeSummary({ id = "uuid-1", name = "By id" }).slug == "uuid-1", "falls back to id")
 check(summary.updated_at == "", "no version stamp when the server sends none", summary.updated_at)

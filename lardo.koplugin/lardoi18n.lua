@@ -25,19 +25,58 @@ local PL = {
     ["Lardo: jump to the ingredients"] = "Lardo: przejdź do składników",
     ["Start with: %1"] = "Zacznij od: %1",
     ["Browse recipes"] = "Przeglądaj przepisy",
-    ["Refresh recipes from the server"] = "Odśwież przepisy z serwera",
+    ["Refresh (last: %1)"] = "Odśwież (ostatnio: %1)",
+    ["Lardo could not open at start-up.\n\n%1"] = "Lardo nie otworzyło się przy starcie.\n\n%1",
+    ["The menu could not be opened.\n\n%1"] = "Nie udało się otworzyć menu.\n\n%1",
+    ["Lardo is missing from KOReader's menu.\n\nA menu order file leaves it out:\n%1\n\nSwitch Lardo back on in the plugin that wrote it, or delete the file."] =
+        "Brakuje Lardo w menu KOReadera.\n\nPomija je plik z kolejnością menu:\n%1\n\nWłącz Lardo z powrotem we wtyczce, która go zapisała, albo skasuj ten plik.",
+    ["Lardo's own tab could not be added to KOReader's menu.\n\nIts layout is fixed by:\n%1\n\nLardo is under Tools instead."] =
+        "Nie udało się dodać własnej zakładki Lardo do menu KOReadera.\n\nJego układ ustala:\n%1\n\nLardo jest zamiast tego w Narzędziach.",
+    ["Lardo's own tab could not be added to KOReader's menu: something else on this device decides how it is laid out.\n\nLardo is under Tools instead."] =
+        "Nie udało się dodać własnej zakładki Lardo do menu KOReadera: o jego układzie decyduje na tym urządzeniu coś innego.\n\nLardo jest zamiast tego w Narzędziach.",
+    ["This KOReader version does not open its menu on request."] =
+        "Ta wersja KOReadera nie otwiera swojego menu na żądanie.",
+    ["never"] = "nigdy",
+    ["Filter: %1"] = "Filtr: %1",
+    ["none"] = "brak",
+    ["Fonts: %1 pt, %2"] = "Czcionki: %1 pt, %2",
+    ["Fonts"] = "Czcionki",
+    ["Size: %1"] = "Rozmiar: %1",
+    ["Order…"] = "Kolejność…",
+    ["Drag them into the order the corner draws them in."] =
+        "Przeciągnij je w kolejność, w jakiej rysuje je róg.",
+    ["This KOReader version cannot reorder them."] =
+        "Ta wersja KOReadera nie umie zmieniać ich kolejności.",
+    ["Connection"] = "Połączenie",
+    ["Screen"] = "Ekran",
+    ["Application settings"] = "Ustawienia aplikacji",
+    ["Shortcut in the library"] = "Skrót w bibliotece",
+    ["Folder: %1"] = "Folder: %1",
+    ["Put the shortcut there"] = "Połóż tam skrót",
+    ["Remove the shortcut"] = "Usuń skrót",
+    ["Removed from the library:\n%1"] = "Usunięto z biblioteki:\n%1",
+    ["This KOReader version has no folder picker."] = "Ta wersja KOReadera nie ma wyboru folderu.",
+    ["Offline"] = "Offline",
+    ["Language"] = "Język",
     ["Fetches the list, and with it every recipe that is new or has changed, so everything is readable without WiFi afterwards."] =
         "Pobiera listę, a wraz z nią każdy nowy lub zmieniony przepis, żeby potem wszystko dało się czytać bez WiFi.",
-    ["Connection: %1"] = "Połączenie: %1",
     ["not set"] = "nie ustawiono",
-    ["View"] = "Widok",
     ["Language: %1"] = "Język: %1",
     ["Follow KOReader (%1)"] = "Za KOReaderem (%1)",
+    ["Shortcut in the library: %1"] = "Skrót w bibliotece: %1",
+    ["Puts a file in the library that opens Lardo when it is tapped, for getting here without the menu."] =
+        "Kładzie w bibliotece plik, który po dotknięciu otwiera Lardo — żeby dostać się tu bez menu.",
+    ["Opening this in KOReader opens Lardo.\n"] = "Otwarcie tego w KOReaderze otwiera Lardo.\n",
+    ["Added to the library:\n%1\n\nOpening it opens Lardo."] =
+        "Dodano do biblioteki:\n%1\n\nOtwarcie tego otwiera Lardo.",
+    ["Could not write the shortcut:\n%1"] = "Nie udało się zapisać skrótu:\n%1",
+    ["Own tab in KOReader's menu"] = "Własna zakładka w menu KOReadera",
+    ["Puts Lardo in the menu's top row, with an icon of its own, and opens the menu straight into it. Off means one entry under Tools, the way plugins usually sit. A plugin that customises the menu can make the tab impossible; Lardo then stays under Tools."] =
+        "Umieszcza Lardo w górnym rzędzie menu, z własną ikoną, i otwiera menu od razu na niej. Wyłączone oznacza jeden wpis w Narzędziach, tak jak zwykle siedzą wtyczki. Wtyczka przestawiająca menu może uniemożliwić zakładkę; Lardo zostaje wtedy w Narzędziach.",
     ["Open Lardo instead of the file browser at start-up"] =
         "Otwieraj Lardo zamiast menedżera plików przy starcie",
 
     -- view settings
-    ["Font size: %1"] = "Rozmiar czcionki: %1",
     ["Font size"] = "Rozmiar czcionki",
     ["Used for the recipes and for the recipe list."] =
         "Używany w przepisach i na liście przepisów.",
@@ -46,34 +85,55 @@ local PL = {
     ["KOReader default"] = "domyślny KOReadera",
     ["Use KOReader's default typeface"] = "Użyj domyślnego kroju KOReadera",
     ["Press a font to use it"] = "Naciśnij czcionkę, aby jej użyć",
+    ["Keep the recipe on screen: %1"] = "Trzymaj przepis na ekranie: %1",
+    ["Keep the recipe on screen"] = "Trzymaj przepis na ekranie",
+    ["A Kindle blanks the screen after ten minutes and has no setting for it. This tells it the recipe is still being read, and redraws the corner of the header while it is at it."] =
+        "Kindle gasi ekran po dziesięciu minutach i nie ma na to ustawienia. To mówi mu, że przepis wciąż jest czytany, a przy okazji odświeża róg nagłówka.",
+    ["Off"] = "Wyłączone",
+    ["Every 5 minutes"] = "Co 5 minut",
+    ["Every 10 minutes"] = "Co 10 minut",
+    ["Every 15 minutes"] = "Co 15 minut",
+    ["Every 30 minutes"] = "Co 30 minut",
+    ["Tags on the recipe list"] = "Tagi na liście przepisów",
+    ["Shows each recipe's tags in the right-hand column, before the time. The filter searches the tags either way."] =
+        "Pokazuje tagi przepisu w prawej kolumnie, przed czasem. Filtr i tak przeszukuje tagi.",
+    ["Status in the corner: %1"] = "Stan w rogu: %1",
+    ["Status in the corner"] = "Stan w rogu",
+    ["Awake"] = "Czuwanie",
+    -- the one letter in the corner of a recipe that says the screen is being
+    -- kept on: "A" for awake, "C" for czuwa
+    ["A"] = "C",
+    ["Battery"] = "Bateria",
+    ["Clock"] = "Zegar",
+    ["Wi-Fi"] = "Wi-Fi",
+    ["WiFi"] = "WiFi",
+    ["nothing"] = "nic",
     ["Reading position bar: %1"] = "Pasek postępu: %1",
     ["Reading position bar"] = "Pasek postępu",
     ["Under the chapters"] = "Pod rozdziałami",
     ["Bottom edge"] = "Przy dolnej krawędzi",
     ["Right edge, whole recipe"] = "Przy prawej krawędzi, cały przepis",
     ["Hidden"] = "Ukryty",
-    ["Button row at the bottom: %1"] = "Rząd przycisków na dole: %1",
-    ["On a touch screen it starts out shown; the same things are on the header and on a long press."] =
-        "Na ekranie dotykowym jest domyślnie widoczny; to samo jest w nagłówku i pod długim przytrzymaniem.",
-    ["shown"] = "widoczny",
-    ["hidden"] = "ukryty",
-    ["View and font"] = "Widok i czcionka",
-    ["This KOReader version has no number picker. Use the A- / A+ buttons in the recipe menu instead."] =
-        "Ta wersja KOReadera nie ma pola liczbowego. Użyj przycisków A- / A+ w menu przepisu.",
+
+    -- the two rows of buttons: where they are and what is on them
+    ["Ingredients"] = "Składniki",
+    ["Back to the list"] = "Powrót do listy",
+    ["Menu"] = "Menu",
     ["This KOReader version does not expose its font list."] =
         "Ta wersja KOReadera nie udostępnia listy czcionek.",
 
     -- connection
     ["Configuration file: %1"] = "Plik konfiguracyjny: %1",
     ["Configuration file: none yet"] = "Plik konfiguracyjny: jeszcze go nie ma",
-    ["Configuration file"] = "Plik konfiguracyjny",
     ["Reload configuration file"] = "Wczytaj ponownie plik konfiguracyjny",
     ["Server address"] = "Adres serwera",
+    ["Server address: %1"] = "Adres serwera: %1",
     ["Mealie server address"] = "Adres serwera Mealie",
     ["Address of your Mealie instance, including the port."] =
         "Adres Twojej instancji Mealie, razem z portem.",
     ["Log in with username and password"] = "Zaloguj się nazwą użytkownika i hasłem",
-    ["Enter API token manually"] = "Wpisz token API ręcznie",
+    ["API token: %1"] = "Token API: %1",
+    ["set"] = "ustawiony",
     ["Test connection"] = "Sprawdź połączenie",
     ["Mealie API token"] = "Token API Mealie",
     ["Tokens are long. It is usually easier to put it in lardo.conf over USB, or to log in with your username and password."] =
@@ -105,10 +165,9 @@ local PL = {
 
     -- the recipe list and its filter box
     ["Filter: %1_   %2/%3"] = "Filtr: %1_   %2/%3",
+    ["Filter: %1   %2/%3"] = "Filtr: %1   %2/%3",
     ["Filter recipes"] = "Filtruj przepisy",
     ["Filter"] = "Filtruj",
-    ["On a device with a keyboard you can simply start typing on the list itself."] =
-        "Na urządzeniu z klawiaturą wystarczy zacząć pisać na samej liście.",
     ["Filters the downloaded recipe list by name and description."] =
         "Filtruje pobraną listę przepisów po nazwie i opisie.",
     ["Clear the filter"] = "Wyczyść filtr",
@@ -116,8 +175,6 @@ local PL = {
         "Brak wyników. Naciśnij Wstecz, aby wyczyścić filtr.",
     ["No recipes yet. Press Menu, then Refresh."] =
         "Nie ma jeszcze przepisów. Naciśnij Menu, a potem Odśwież.",
-    ["Refresh from the server"] = "Odśwież z serwera",
-    ["Lardo settings"] = "Ustawienia Lardo",
     ["Close Lardo"] = "Zamknij Lardo",
     ["Sort by: %1"] = "Sortowanie: %1",
     ["Sort recipes by"] = "Sortuj przepisy wg",
@@ -154,7 +211,6 @@ local PL = {
     ["Cancel"] = "Anuluj",
     ["Save"] = "Zapisz",
     ["Back"] = "Wstecz",
-    ["Close"] = "Zamknij",
 
     -- errors
     ["Something went wrong."] = "Coś poszło nie tak.",
@@ -199,11 +255,6 @@ local PL_PLURAL = {
         "%1 przepis dostępny.",
         "%1 przepisy dostępne.",
         "%1 przepisów dostępnych.",
-    },
-    ["%1 deleted recipe removed from the device."] = {
-        "Usunięto z urządzenia %1 skasowany przepis.",
-        "Usunięto z urządzenia %1 skasowane przepisy.",
-        "Usunięto z urządzenia %1 skasowanych przepisów.",
     },
     ["%1 recipe added."] = { "Dodano %1 przepis.", "Dodano %1 przepisy.", "Dodano %1 przepisów." },
     ["%1 recipe updated."] = {
