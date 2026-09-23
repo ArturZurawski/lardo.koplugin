@@ -9,12 +9,10 @@ function Screen:scaleBySize(n) return n end
 local PowerD = {
     capacity = 75,
     charging = false,
-    t1_resets = 0,
 }
 function PowerD:getCapacity() return self.capacity end
 function PowerD:isCharging() return self.charging end
 function PowerD:isCharged() return false end
-function PowerD:resetT1Timeout() self.t1_resets = self.t1_resets + 1 end
 
 return {
     home_dir = os.getenv("MEALIE_TEST_DIR") or "/tmp/mealie-kotest",

@@ -100,7 +100,7 @@ cd /tmp && git clone --depth 1 https://github.com/LuaJIT/LuaJIT.git
 cd LuaJIT && make -j4          # result: /tmp/LuaJIT/src/luajit
 ```
 
-Currently: **786 checks, 0 failures** (296 + 490).
+Currently: **789 checks, 0 failures** (296 + 493).
 
 `tests/bench.sh` is not part of the suite and asserts nothing; it prints how
 long the things somebody waits for actually take, on 300 synthetic recipes
@@ -930,6 +930,37 @@ saved order rather than dropped, so it appears for everybody.
     late. Worth knowing: AutoSuspend's Kindle branch stops resetting t1 once its
     own suspend timeout has elapsed, `pause_auto_suspend` or not, so after that
     point ours is the only reset happening.
+
+75. **Keeping the screen on kept the whole Kindle from responding.** It did hold
+    the screensaver off; after a while nothing could be pressed. The only thing
+    in this plugin that can wedge a device is the one call that left it:
+    `PowerD:resetT1Timeout()`. On a Kindle with `liblipclua` it is a lipc
+    property set on `com.lab126.powerd`; **without** it (a Kindle Keyboard, per
+    its own boot log) it is `os.execute("lipc-set-prop …")` — a forked process,
+    on the drawing thread, every four minutes — and powerd refuses it outright
+    once the screensaver is up.
+
+    KOReader already asks powerd the same thing, on the same four-minute
+    cadence, with guards we had none of (not while charging, not while something
+    else has disabled the screensaver, not more often than powerd wants it). So
+    Lardo does not ask powerd anything now: it fires
+    `UIManager.event_hook:execute("InputEvent")`, the hook a real keypress
+    fires, which is what `AutoSuspend` listens to. That one call resets both the
+    clock it suspends on and the one its Kindle branch resets t1 from.
+    `PluginShare.pause_auto_suspend` stays as well: a user can set KOReader's
+    own suspend timeout shorter than our four minutes, and the flag covers that.
+
+    The cost is one case: with KOReader's auto-suspend switched off entirely,
+    nothing resets t1 and the screensaver comes on its own schedule. That is a
+    device already choosing to blank, and it is not worth a forked process on
+    the drawing thread to argue with.
+
+76. **"If it pings on a fixed clock, the interval in the menu is a lie."** It
+    was: *Keep the recipe on screen* offered 5/10/15/30 minutes while the saying
+    happened every four regardless. It is one switch now — the four minutes are
+    the device's business, not a number to guess — and the corner of the header
+    is redrawn on the same tick. An older version stored minutes in that
+    setting, and any number still reads as "on".
 
 ## A tab in KOReader's menu
 

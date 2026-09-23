@@ -1,4 +1,14 @@
 local UIManager = { shown = {}, ticks = {}, scheduled = {} }
+
+-- KOReader's hook container: what a real keypress fires, and what AutoSuspend
+-- listens to in order to know that somebody is still here. Saying it is how a
+-- plugin keeps the screen on without talking to the power daemon itself.
+UIManager.event_hook = {
+    fired = {},
+    execute = function(self, name)
+        self.fired[name] = (self.fired[name] or 0) + 1
+    end,
+}
 function UIManager:show(w) table.insert(self.shown, w) end
 function UIManager:close(w) for i = #self.shown, 1, -1 do if self.shown[i] == w then table.remove(self.shown, i) end end end
 function UIManager:nextTick(fn) table.insert(self.ticks, fn) end

@@ -269,7 +269,7 @@ Sort by: Name
 Refresh (last: 2026-09-20 14:20)
 Screen                  ->  Fonts: 20 pt, Alpha Regular
                             Reading position bar: Under the chapters
-                            Keep the recipe on screen: Every 10 minutes
+                            Keep the recipe on screen        ✓
                             Status in the corner: Awake, Battery
 Connection              ->  Server address: http://mealie.lan:9000
                             Log in · API token: set · Test connection · lardo.conf
@@ -330,16 +330,20 @@ off the event devices, so as far as the Kindle is concerned a recipe being read 
 device nobody has touched — which is how you end up wiping your hands to press a key.
 
 *Keep the recipe on screen* (in the recipe's menu, and in *Tools → Lardo*) says
-otherwise. While a recipe is open it tells the device's power daemon that the screensaver
-timer should start again — **every four minutes**, which is KOReader's own figure for the
-same job and lower than the shortest screensaver any Kindle has. It also holds off
-KOReader's own auto-suspend, which is a separate clock.
+otherwise. While a recipe is open it tells KOReader that somebody is still there — on the
+same hook a keypress fires, **every four minutes** — and KOReader does the rest: it puts
+off its own sleep and, on a Kindle, keeps resetting the device's screensaver timer, each
+with the checks it already makes (nothing while the device is charging, nothing while
+something else has switched the screensaver off outright).
 
-The setting (**10 minutes** by default — or 5, 15, 30, or off) is how often the **corner
-of the header** is redrawn while that is going on, so the battery and the clock up there
-are true rather than however they were when you opened the recipe. The two are separate
-on purpose: an e-ink refresh every four minutes to move a clock by four minutes is more
-flicker than anybody wants, and a device that blanks after five is not going to wait ten.
+Lardo does not talk to the power daemon itself. The same request without KOReader's
+checks is one forked process on the drawing thread every few minutes, and a device that
+can end up unable to be woken.
+
+It is one switch, on unless you turn it off — there is no interval to pick, because the
+four minutes are the device's business rather than a number anybody should have to guess.
+The **corner of the header** is redrawn on the same tick, so the battery and the clock up
+there are true rather than however they were when you opened the recipe.
 
 Two things about it worth knowing:
 

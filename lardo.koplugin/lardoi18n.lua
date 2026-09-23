@@ -85,15 +85,9 @@ local PL = {
     ["KOReader default"] = "domyślny KOReadera",
     ["Use KOReader's default typeface"] = "Użyj domyślnego kroju KOReadera",
     ["Press a font to use it"] = "Naciśnij czcionkę, aby jej użyć",
-    ["Keep the recipe on screen: %1"] = "Trzymaj przepis na ekranie: %1",
     ["Keep the recipe on screen"] = "Trzymaj przepis na ekranie",
-    ["A Kindle blanks the screen after ten minutes and has no setting for it. This tells it the recipe is still being read, and redraws the corner of the header while it is at it."] =
-        "Kindle gasi ekran po dziesięciu minutach i nie ma na to ustawienia. To mówi mu, że przepis wciąż jest czytany, a przy okazji odświeża róg nagłówka.",
-    ["Off"] = "Wyłączone",
-    ["Every 5 minutes"] = "Co 5 minut",
-    ["Every 10 minutes"] = "Co 10 minut",
-    ["Every 15 minutes"] = "Co 15 minut",
-    ["Every 30 minutes"] = "Co 30 minut",
+    ["A Kindle blanks the screen on a timer of its own that the device gives you no setting for. This tells KOReader that somebody is still reading, every few minutes, and KOReader holds off both its own sleep and the device's screensaver."] =
+        "Kindle gasi ekran na własnym liczniku, którego urządzenie nie daje ustawić. To mówi KOReaderowi, że ktoś wciąż czyta — co kilka minut — a KOReader wstrzymuje i własne usypianie, i wygaszacz urządzenia.",
     ["Tags on the recipe list"] = "Tagi na liście przepisów",
     ["Shows each recipe's tags in the right-hand column, before the time. The filter searches the tags either way."] =
         "Pokazuje tagi przepisu w prawej kolumnie, przed czasem. Filtr i tak przeszukuje tagi.",

@@ -75,21 +75,13 @@ local PROGRESS_POSITIONS = {
 -- The *poking* is on its own clock, below: how often the corner is worth
 -- redrawing is a matter of taste, and how often the device has to be told is a
 -- matter of the device.
-local DEFAULT_KEEP_AWAKE = 10
--- Every four minutes, which is KOReader's own figure for this: its AutoSuspend
--- resets the same timer on the same clock, with the comment "lower than the
--- minimum t1 timeout" -- so five minutes is the shortest any Kindle allows, and
--- the ten-minute interval this used to poke on was simply too late on a device
--- set to five. (It also cannot help once the screensaver is already up: powerd
--- refuses the reset then.)
+-- Every four minutes, which is KOReader's own figure for the same job: its
+-- AutoSuspend resets the framework's screensaver timer on that cadence, with
+-- the comment "lower than the minimum t1 timeout" -- five minutes being the
+-- shortest any Kindle allows. Saying it less often than that is saying it too
+-- late on a device set to five, and nothing can be said at all once the
+-- screensaver is up.
 local KEEP_AWAKE_POKE_SECONDS = 4 * 60
-local KEEP_AWAKE_INTERVALS = {
-    { 0,  "Off" },
-    { 5,  "Every 5 minutes" },
-    { 10, "Every 10 minutes" },
-    { 15, "Every 15 minutes" },
-    { 30, "Every 30 minutes" },
-}
 
 -- What the corner of a recipe's header shows besides its cooking time.
 local STATUS_ITEMS = {
@@ -1092,15 +1084,6 @@ end
 
 --- Mealie translates its answers from the Accept-Language header we send, and
 -- the same setting picks the wording of the recipe chapters.
-local function keepAwakeLabel(minutes)
-    for i = 1, #KEEP_AWAKE_INTERVALS do
-        if KEEP_AWAKE_INTERVALS[i][1] == minutes then
-            return _(KEEP_AWAKE_INTERVALS[i][2])
-        end
-    end
-    return tostring(minutes)
-end
-
 --- The menu, once: the doors in and out of Lardo, what is done to the list, and
 -- the settings behind three categories.
 --
@@ -1232,13 +1215,25 @@ function Lardo:getScreenMenuTable()
             sub_items = function() return self:getProgressMenuTable() end,
         },
         {
-            text_func = function()
-                return T(_("Keep the recipe on screen: %1"),
-                    keepAwakeLabel(self:getKeepAwakeInterval()))
+            text_func = function() return _("Keep the recipe on screen") end,
+            help_text = _("A Kindle blanks the screen on a timer of its own that the device gives you no setting for. This tells KOReader that somebody is still reading, every few minutes, and KOReader holds off both its own sleep and the device's screensaver."),
+            checked_func = function() return self:keepsAwake() end,
+            keep_menu_open = true,
+            callback = function(on_change)
+                local was_off = not self:keepsAwake()
+                self.settings:saveSetting("keep_awake", was_off)
+                self.settings:flush()
+                self:stopKeepAwake()
+                if self.viewer then self:startKeepAwake() end
+                -- Switched on with nothing in the corner to show for it is a
+                -- feature nobody can tell is working: the recipe simply stays
+                -- on the screen, which is also what it does when this is off
+                -- and you keep touching it. So the marker comes with it --
+                -- once, when it is switched on; taking the marker away
+                -- afterwards is then a decision of its own.
+                if was_off then self:showStatusItem("awake") end
+                if on_change then on_change() end
             end,
-            help_text = _("A Kindle blanks the screen after ten minutes and has no setting for it. This tells it the recipe is still being read, and redraws the corner of the header while it is at it."),
-            title = _("Keep the recipe on screen"),
-            sub_items = function() return self:getKeepAwakeMenuTable() end,
         },
         {
             text_func = function() return _("Tags on the recipe list") end,
@@ -1387,35 +1382,6 @@ function Lardo:getProgressMenuTable()
             keep_menu_open = true,
             callback = function(on_change)
                 self:applyViewSetting("progress_position", position, "progress_position")
-                if on_change then on_change() end
-            end,
-        })
-    end
-    return items
-end
-
---- One level down from "Keep the recipe on screen": how often to say so.
-function Lardo:getKeepAwakeMenuTable()
-    local items = {}
-    for i = 1, #KEEP_AWAKE_INTERVALS do
-        local minutes, label = KEEP_AWAKE_INTERVALS[i][1], KEEP_AWAKE_INTERVALS[i][2]
-        table.insert(items, {
-            text_func = function() return _(label) end,
-            checked_func = function() return self:getKeepAwakeInterval() == minutes end,
-            keep_menu_open = true,
-            callback = function(on_change)
-                local was_off = self:getKeepAwakeInterval() <= 0
-                self.settings:saveSetting("keep_awake", minutes)
-                self.settings:flush()
-                self:stopKeepAwake()
-                if self.viewer then self:startKeepAwake() end
-                -- Switched on with nothing in the corner to show for it is a
-                -- feature nobody can tell is working: the recipe simply stays
-                -- on the screen, which is also what it does when this is off
-                -- and you keep touching it. So the marker comes with it --
-                -- once, when it is switched on; turning the marker off again
-                -- and then changing the interval leaves that decision alone.
-                if was_off and minutes > 0 then self:showStatusItem("awake") end
                 if on_change then on_change() end
             end,
         })
@@ -2545,30 +2511,35 @@ end
 -- the event devices, so as far as powerd is concerned a recipe being read is a
 -- device nobody has touched.
 --
--- What it does understand is being told to start counting again, which is what
--- KindlePowerD:resetT1Timeout() does (it sets com.lab126.powerd's
--- touchScreenSaverTimeout through lipc). So: while a recipe is open, say so
--- every few minutes. Nothing is left switched on behind us -- stop saying it,
--- and ten minutes later the Kindle does what it always did. That is the whole
--- reason this is a repeating nudge rather than
--- `lipc-set-prop com.lab126.powerd preventScreenSaver 1`, which is a flag you
--- can leave a device stuck with if KOReader goes away without clearing it.
+-- What it does understand is being told to start counting again, and KOReader
+-- already tells it: its AutoSuspend resets that timer every four minutes for as
+-- long as it believes somebody is there. So this does not talk to the power
+-- daemon at all -- it says "somebody is there", every few minutes, on the same
+-- hook a keypress fires, and KOReader does the rest with its own guards.
+--
+-- Nothing is left switched on behind us: stop saying it and the Kindle does
+-- what it always did. That is the whole reason this is a repeating nudge rather
+-- than `lipc-set-prop com.lab126.powerd preventScreenSaver 1`, which is a flag
+-- you can leave a device stuck with if KOReader goes away without clearing it.
 --==========================================================================
 
---- @return minutes between nudges, or 0 when the recipe is left to fall asleep
-function Lardo:getKeepAwakeInterval()
+--- @return whether an open recipe is kept on the screen. On unless switched
+-- off: a recipe that blanks mid-cooking is the thing this plugin is for.
+--
+-- Older versions stored minutes here, and 0 for off; any number means the same
+-- thing it did then.
+function Lardo:keepsAwake()
     local stored = self.settings:readSetting("keep_awake")
-    for i = 1, #KEEP_AWAKE_INTERVALS do
-        if KEEP_AWAKE_INTERVALS[i][1] == stored then return stored end
-    end
-    return DEFAULT_KEEP_AWAKE
+    if stored == nil then return true end
+    if type(stored) == "number" then return stored > 0 end
+    return stored == true
 end
 
 --- Whether the screen is actually being kept on right now -- which is not the
 -- same as the setting being on: while charging we leave the device alone, and
 -- then saying so in the corner would be a lie.
 function Lardo:isKeepingAwake()
-    if self:getKeepAwakeInterval() <= 0 then return false end
+    if not self:keepsAwake() then return false end
     local powerd = Device.getPowerDevice and Device:getPowerDevice()
     -- KOReader's own AutoSuspend skips the reset while charging, where it
     -- causes problems; a charging device is not about to run its battery down.
@@ -2577,43 +2548,44 @@ function Lardo:isKeepingAwake()
     return not charging
 end
 
---- Tells the device the recipe is still being read, and redraws the header so
--- that what it says about the battery and the time is true.
+--- Says "the reader is still here", the way KOReader says it to itself, and
+-- redraws the header so that what it says about the battery and the time is
+-- true.
+--
+-- `UIManager.event_hook:execute("InputEvent")` is the hook a real keypress
+-- fires. AutoSuspend listens to it, and resets *both* the clock its own suspend
+-- runs on and the one its Kindle branch resets the framework's screensaver
+-- timer from -- each with its own guards: nothing while charging, nothing while
+-- something else has disabled the screensaver outright, and never more often
+-- than powerd wants to hear it.
+--
+-- Talking to powerd ourselves (`PowerD:resetT1Timeout()`) is the same request
+-- without any of those guards, and on a device with no `liblipclua` it is an
+-- `os.execute` -- a forked process, on the UI thread, every few minutes. Saying
+-- it through KOReader costs nothing and cannot wedge anything.
 function Lardo:keepAwakeTick()
-    local powerd = Device.getPowerDevice and Device:getPowerDevice()
-    if powerd and powerd.resetT1Timeout and self:isKeepingAwake() then
-        local ok, err = pcall(function() powerd:resetT1Timeout() end)
+    local hook = UIManager.event_hook
+    if hook and hook.execute and self:isKeepingAwake() then
+        local ok, err = pcall(function() hook:execute("InputEvent") end)
         if not ok then
-            logger.warn("Lardo: could not reset the screensaver timer:", err)
+            logger.warn("Lardo: could not say the reader is still here:", err)
         end
     end
-    -- The corner is the visible half, and it is on the interval that was asked
-    -- for: an e-ink refresh every four minutes to move a clock by four minutes
-    -- is more flicker than anybody wants.
-    local due = self:getKeepAwakeInterval() * 60 - 30
-    local now = os.time()
-    if not self.status_drawn_at or now - self.status_drawn_at >= due then
-        self.status_drawn_at = now
-        self:refreshStatus()
-    end
+    -- and while we are awake anyway, the corner: a clock that is four minutes
+    -- out is worth a partial refresh of the few pixels it is drawn in
+    self:refreshStatus()
     self:scheduleKeepAwake()
 end
 
 function Lardo:scheduleKeepAwake()
-    local minutes = self:getKeepAwakeInterval()
-    if minutes <= 0 or not self.viewer then return end
+    if not self:keepsAwake() or not self.viewer then return end
     self.keep_awake_task = self.keep_awake_task or function() self:keepAwakeTick() end
     UIManager:unschedule(self.keep_awake_task)
-    -- Never further apart than the device allows, and never further apart than
-    -- what was asked for either -- picking "every 5 minutes" should not mean a
-    -- corner that is redrawn less often than that.
-    local seconds = math.min(KEEP_AWAKE_POKE_SECONDS, math.max(minutes * 60 - 30, 60))
-    UIManager:scheduleIn(seconds, self.keep_awake_task)
+    UIManager:scheduleIn(KEEP_AWAKE_POKE_SECONDS, self.keep_awake_task)
 end
 
 function Lardo:startKeepAwake()
-    if self:getKeepAwakeInterval() <= 0 then return end
-    self.status_drawn_at = nil -- the first tick draws it
+    if not self:keepsAwake() then return end
     -- KOReader's own auto-suspend is a separate clock from the framework's, and
     -- would put the device to sleep with the recipe on screen; this is the flag
     -- its plugins use to say "not now" (autoturn.koplugin does the same).

@@ -1593,7 +1593,7 @@ check(itemStartingWith(connection, "Server address: http://mealie.lan:9000") ~= 
     table.concat(dialogLabels({ buttons = {} }), ""))
 local screen_level = itemStartingWith(menu_items, "Screen").sub_item_table
 check(itemStartingWith(screen_level, "Fonts: 24 pt") ~= nil, "the fonts say what they are set to")
-check(itemStartingWith(screen_level, "Keep the recipe on screen: ") ~= nil,
+check(itemStartingWith(screen_level, "Keep the recipe on screen") ~= nil,
     "and so does what keeps the screen awake, wherever the menu was opened from")
 
 --== a tab of our own in KOReader's menu ==================================
@@ -2060,43 +2060,59 @@ plugin.name = real_plugin_name
 local DevicePowerD = require("device").powerd
 plugin.settings:saveSetting("keep_awake", nil)
 plugin.settings:saveSetting("status_items", nil)
-check(plugin:getKeepAwakeInterval() == 10, "ten minutes unless told otherwise",
-    plugin:getKeepAwakeInterval())
+check(plugin:keepsAwake(), "a recipe is kept on the screen unless that is switched off")
+-- it is one switch: the four minutes it is said on are the device's business,
+-- not a number anybody should have to pick. An older version stored minutes
+-- here, and any of them meant the same as "on".
+plugin.settings:saveSetting("keep_awake", 10)
+check(plugin:keepsAwake(), "what an older version stored as minutes still means on")
+plugin.settings:saveSetting("keep_awake", 0)
+check(plugin:keepsAwake() == false, "and its 0 still means off")
 
 -- Switching it on with nothing in the corner to show for it is a feature nobody
 -- can tell is working: the recipe stays on the screen, which is what it does
 -- anyway while you keep touching it. So the marker comes on with it.
 do
     local function awakeShown() return plugin:getStatusItems().awake == true end
-    local function pressInterval(label)
-        local item = findItem(plugin:getKeepAwakeMenuTable(), label)
-        check(item ~= nil, "the keep-awake menu offers " .. label)
-        if item then item.callback() end
+    local function pressSwitch()
+        local item = findItemDeep(plugin:menuItemsToTouchMenu(plugin:getMenuItems()),
+            "Keep the recipe on screen")
+        check(item ~= nil, "the menu has the switch")
+        if item then item.callback({ updateItems = function() end }) end
     end
-    plugin.settings:saveSetting("keep_awake", 0)
+    plugin.settings:saveSetting("keep_awake", false)
     plugin.settings:saveSetting("status_items", { battery = true, awake = false })
     check(awakeShown() == false, "with the marker switched off and nothing kept awake")
-    pressInterval("Every 10 minutes")
-    check(awakeShown(), "switching it on brings its marker with it")
+    pressSwitch()
+    check(plugin:keepsAwake() and awakeShown(), "switching it on brings its marker with it")
 
-    -- ...but only then: turning the marker off while it runs is a decision
+    -- ...and then it is yours: taking it away while this stays on keeps it away
     plugin:toggleStatusItem("awake")
     check(awakeShown() == false, "the marker can still be taken away")
-    pressInterval("Every 30 minutes")
-    check(awakeShown() == false, "and changing the interval leaves that alone")
+    check(plugin:statusText():find("A", 1, true) == nil, "and stays away while it runs",
+        plugin:statusText())
+    -- every switch-on brings it, though: that is what makes the switch visible
+    pressSwitch()
+    pressSwitch()
+    check(plugin:keepsAwake() and awakeShown(),
+        "switching it off and on again brings it back, the way switching it on does")
     plugin.settings:saveSetting("keep_awake", nil)
     plugin.settings:saveSetting("status_items", nil)
 end
 
 UIManager.scheduled = {}
-DevicePowerD.t1_resets = 0
+UIManager.event_hook.fired.InputEvent = 0
 plugin.list = { Recipe.normalizeSummary({ slug = "b", name = "B", updatedAt = "t4" }) }
 plugin:buildItemTable()
 plugin.viewer = nil
 next_responses = { { code = 200, body = '{slug="b",name="B",updatedAt="t4",recipeInstructions={{text="B4"}}}' } }
 plugin:showRecipeAt(1)
-check(DevicePowerD.t1_resets == 1, "opening a recipe says it straight away",
-    DevicePowerD.t1_resets)
+-- said the way a keypress says it: AutoSuspend hears that hook and resets both
+-- the clock it suspends on and the one it resets the device's screensaver timer
+-- from, each with its own guards. Talking to the power daemon ourselves is the
+-- same request without any of them.
+check(UIManager.event_hook.fired.InputEvent == 1, "opening a recipe says it straight away",
+    UIManager.event_hook.fired.InputEvent)
 check(#UIManager.scheduled == 1, "and asks to say it again", #UIManager.scheduled)
 check(UIManager.scheduled[1].seconds == 4 * 60,
     "on the device's clock, not on the one the corner is redrawn on: four minutes "
@@ -2106,24 +2122,23 @@ check(require("pluginshare").pause_auto_suspend == true,
     "KOReader's own sleep is held off too, or it would suspend under the recipe")
 
 UIManager:runScheduled()
-check(DevicePowerD.t1_resets == 2, "every tick says it again", DevicePowerD.t1_resets)
+check(UIManager.event_hook.fired.InputEvent == 2, "every tick says it again",
+    UIManager.event_hook.fired.InputEvent)
 check(#UIManager.scheduled == 1, "and schedules the next one")
 
 -- charging is the one time the reset causes trouble (KOReader's own AutoSuspend
 -- skips it too), and a charging Kindle is not about to run its battery down
 DevicePowerD.charging = true
 UIManager:runScheduled()
-check(DevicePowerD.t1_resets == 2, "nothing is poked while charging", DevicePowerD.t1_resets)
+check(UIManager.event_hook.fired.InputEvent == 2, "nothing is said while charging",
+    UIManager.event_hook.fired.InputEvent)
 check(#UIManager.scheduled == 1, "but the ticking carries on")
-plugin.status_drawn_at = nil -- as if the interval had come round
-UIManager:runScheduled()
 check(plugin.viewer.status_text == "+75%", "and a charging battery says so in the corner",
     plugin.viewer.status_text)
 check(plugin.viewer.status_text:find("A", 1, true) == nil,
     "with nothing claiming the screen is being kept on, because it is not",
     plugin.viewer.status_text)
 DevicePowerD.charging = false
-plugin.status_drawn_at = nil -- and again
 UIManager:runScheduled()
 
 -- the corner of the header, and that it follows the device
@@ -2132,14 +2147,8 @@ check(plugin.viewer.status_text == "A  75%",
     plugin.viewer.status_text)
 DevicePowerD.capacity = 42
 UIManager:runScheduled()
-check(plugin.viewer.status_text == "A  75%",
-    "a poke in between leaves the corner alone: an e-ink refresh every four minutes "
-    .. "to move a clock by four minutes is more flicker than anybody wants",
-    plugin.viewer.status_text)
-plugin.status_drawn_at = nil -- the interval comes round
-UIManager:runScheduled()
-check(plugin.viewer.status_text == "A  42%", "and then it is brought up to date",
-    plugin.viewer.status_text)
+check(plugin.viewer.status_text == "A  42%",
+    "and every tick brings the corner up to date with it", plugin.viewer.status_text)
 -- the corner is arranged in one window, not a dialog that closes and reopens on
 -- every tick: the same SortWidget the button rows use. Opened the way a reader
 -- opens it -- through KOReader's menu, which hands the entry its TouchMenu
@@ -2240,17 +2249,17 @@ check(plugin:statusText():find("A", 1, true) ~= nil, "and says it again when it 
 -- nothing is scheduled at all with it off
 plugin.settings:saveSetting("keep_awake", 0)
 UIManager.scheduled = {}
-DevicePowerD.t1_resets = 0
+UIManager.event_hook.fired.InputEvent = 0
 next_responses = { { code = 200, body = '{slug="b",name="B",updatedAt="t4",recipeInstructions={{text="B4"}}}' } }
 plugin:showRecipeAt(1)
-check(#UIManager.scheduled == 0 and DevicePowerD.t1_resets == 0,
+check(#UIManager.scheduled == 0 and UIManager.event_hook.fired.InputEvent == 0,
     "turned off, a recipe is left to fall asleep like anything else")
 plugin.viewer.close_callback()
 plugin.viewer = nil
 plugin.settings:saveSetting("keep_awake", nil)
 
 -- and it is offered where a recipe can be open, not on the list
-check(hasLabel(allMenuLabels(), "Keep the recipe on screen: ") ~= nil,
+check(hasLabel(allMenuLabels(), "Keep the recipe on screen") ~= nil,
     "the menu offers it, under Screen")
 check(hasLabel(allMenuLabels(), "Status in the corner: Awake, Battery") ~= nil,
     "along with what the corner shows",
