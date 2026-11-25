@@ -9,6 +9,25 @@ local L = require("lardolang")
 
 local Recipe = {}
 
+-- Letters a Kindle keyboard cannot type, and what typing them looks like there:
+-- "zurek" has to find "Żurek". Lowercase only -- the haystack is lowered first.
+local FOLD = {
+    ["ą"] = "a", ["ć"] = "c", ["ę"] = "e", ["ł"] = "l", ["ń"] = "n", ["ó"] = "o",
+    ["ś"] = "s", ["ź"] = "z", ["ż"] = "z",
+    ["á"] = "a", ["à"] = "a", ["â"] = "a", ["ä"] = "a", ["ã"] = "a", ["å"] = "a",
+    ["é"] = "e", ["è"] = "e", ["ê"] = "e", ["ë"] = "e", ["ě"] = "e",
+    ["í"] = "i", ["ì"] = "i", ["î"] = "i", ["ï"] = "i",
+    ["ò"] = "o", ["ô"] = "o", ["ö"] = "o", ["õ"] = "o", ["ø"] = "o",
+    ["ú"] = "u", ["ù"] = "u", ["û"] = "u", ["ü"] = "u", ["ů"] = "u",
+    ["ý"] = "y", ["ÿ"] = "y", ["ç"] = "c", ["č"] = "c", ["ď"] = "d", ["ñ"] = "n",
+    ["ň"] = "n", ["ř"] = "r", ["š"] = "s", ["ť"] = "t", ["ž"] = "z", ["ß"] = "ss",
+}
+
+--- Lowercase text with its accents taken off, for matching what was typed.
+function Recipe.foldAccents(text)
+    return (text:gsub("[\195-\197][\128-\191]", FOLD))
+end
+
 --- JSON nulls come back as nil or as a light userdata depending on the decoder,
 -- so anything that is not a string/number is treated as absent.
 local function str(value)
@@ -30,7 +49,28 @@ local ENTITIES = {
     amp = "&", lt = "<", gt = ">", quot = '"', apos = "'",
     nbsp = " ", ndash = "-", mdash = "-", hellip = "...",
     deg = "\u{00B0}", frac12 = "1/2", frac14 = "1/4", frac34 = "3/4",
+    -- the accented letters a scraped Polish, French or German page spells out
+    oacute = "\u{00F3}", Oacute = "\u{00D3}", eacute = "\u{00E9}", Eacute = "\u{00C9}",
+    aacute = "\u{00E1}", egrave = "\u{00E8}", agrave = "\u{00E0}", ccedil = "\u{00E7}",
+    auml = "\u{00E4}", ouml = "\u{00F6}", uuml = "\u{00FC}", Auml = "\u{00C4}",
+    Ouml = "\u{00D6}", Uuml = "\u{00DC}", szlig = "\u{00DF}", times = "\u{00D7}",
 }
+
+--- A code point as UTF-8, or nil when it is not one.
+local function utf8char(code)
+    if not code or code < 0 or code > 0x10FFFF or (code >= 0xD800 and code <= 0xDFFF) then
+        return nil
+    elseif code < 0x80 then
+        return string.char(code)
+    elseif code < 0x800 then
+        return string.char(0xC0 + math.floor(code / 0x40), 0x80 + code % 0x40)
+    elseif code < 0x10000 then
+        return string.char(0xE0 + math.floor(code / 0x1000),
+            0x80 + math.floor(code / 0x40) % 0x40, 0x80 + code % 0x40)
+    end
+    return string.char(0xF0 + math.floor(code / 0x40000), 0x80 + math.floor(code / 0x1000) % 0x40,
+        0x80 + math.floor(code / 0x40) % 0x40, 0x80 + code % 0x40)
+end
 
 --- Mealie stores markdown, but recipes scraped from the web often carry HTML
 -- leftovers too. Neither renders in a plain TextViewer, so flatten both.
@@ -40,13 +80,14 @@ local function cleanText(value)
     s = s:gsub("\r\n", "\n"):gsub("\r", "\n")
     s = s:gsub("<[bB][rR]%s*/?>", "\n")
     s = s:gsub("</[pPlL][iI]?>", "\n")
-    s = s:gsub("<[^<>]->", "")
-    s = s:gsub("&#(%d+);", function(n)
-        local c = tonumber(n)
-        return c and c < 128 and string.char(c) or ""
-    end)
-    s = s:gsub("&(%a+);", function(name)
-        return ENTITIES[name:lower()] or ""
+    -- only what looks like a tag: "<10 min, then >5 min" is an instruction
+    s = s:gsub("<%/?%a[^<>]*>", "")
+    -- entities: "&#322;" is a Polish letter, not something to drop; one we do
+    -- not know stays as written rather than vanishing from the text
+    s = s:gsub("&#[xX](%x+);", function(n) return utf8char(tonumber(n, 16)) end)
+    s = s:gsub("&#(%d+);", function(n) return utf8char(tonumber(n)) end)
+    s = s:gsub("&(%a+%d*);", function(name)
+        return ENTITIES[name] or ENTITIES[name:lower()]
     end)
     -- markdown: links, emphasis, headings, horizontal rules, list bullets
     s = s:gsub("!?%[([^%]]*)%]%b()", "%1")
@@ -113,6 +154,19 @@ local function ingredientText(raw)
     return cleanText(line)
 end
 
+--- What a recipe makes. Mealie v2 splits it into a number
+-- (`recipeYieldQuantity`) and the words after it (`recipeYield`); v1 had only
+-- the text. Put back together the way Mealie's own recipe_yield_display does.
+local function yieldText(raw)
+    local text = trim(raw.recipeYield)
+    local quantity = tonumber(raw.recipeYieldQuantity)
+    if not quantity or quantity <= 0 then return text end
+    if text == "" then return str(quantity) end
+    -- an older text that already starts with its number keeps it once
+    if text:match("^%d") then return text end
+    return str(quantity) .. " " .. text
+end
+
 --- Shrinks a recipe summary to what the list view needs.
 function Recipe.normalizeSummary(raw)
     if type(raw) ~= "table" then return nil end
@@ -139,7 +193,7 @@ function Recipe.normalizeSummary(raw)
         prep_time = trim(raw.prepTime),
         perform_time = trim(raw.performTime),
         cook_time = trim(raw.cookTime),
-        recipe_yield = trim(raw.recipeYield),
+        recipe_yield = yieldText(raw),
         categories = nameList(raw.recipeCategory),
         tags = nameList(raw.tags),
         rating = tonumber(raw.rating),
@@ -172,6 +226,11 @@ function Recipe.normalizeFull(raw)
             local entry = raw.recipeInstructions[i]
             local text = type(entry) == "table" and cleanText(entry.text) or cleanText(entry)
             local title = type(entry) == "table" and trim(entry.title) or ""
+            -- Mealie v2's one-line summary of a step goes in front of it
+            local summary = type(entry) == "table" and cleanText(entry.summary) or ""
+            if summary ~= "" then
+                text = text ~= "" and (summary .. "\n" .. text) or summary
+            end
             if text ~= "" or title ~= "" then
                 table.insert(recipe.steps, { title = title, text = text })
             end
@@ -261,9 +320,11 @@ function Recipe.toChapters(recipe)
     -- Description: the summary of the recipe, plus whatever prose it has.
     local lines = {}
     local meta = {}
+    -- both when both are set: "4 servings" and "12 cookies" say different things
     if recipe.servings ~= "" and recipe.servings ~= "0" then
         table.insert(meta, L.t("servings") .. ": " .. recipe.servings)
-    elseif recipe.recipe_yield ~= "" then
+    end
+    if recipe.recipe_yield ~= "" then
         table.insert(meta, L.t("recipe_yield") .. ": " .. recipe.recipe_yield)
     end
     if recipe.total_time ~= "" then

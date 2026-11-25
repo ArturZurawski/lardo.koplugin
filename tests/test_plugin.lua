@@ -168,6 +168,12 @@ plugin:addToMainMenu(reader_items)
 check(reader_items.lardo ~= nil, "menu entry also added without start_with")
 
 -- the toggle in our own menu flips back to the file browser
+-- a level of KOReader's menu as TouchMenu reaches it: built when opened
+local function subItems(item)
+    if item.sub_item_table_func then return item.sub_item_table_func() end
+    return item.sub_item_table
+end
+
 local function findItem(sub_item_table, label)
     for i = 1, #sub_item_table do
         local item = sub_item_table[i]
@@ -180,8 +186,8 @@ local function findItemDeep(sub_item_table, label)
     local item = findItem(sub_item_table, label)
     if item then return item end
     for i = 1, #sub_item_table do
-        if sub_item_table[i].sub_item_table then
-            local found = findItemDeep(sub_item_table[i].sub_item_table, label)
+        if subItems(sub_item_table[i]) then
+            local found = findItemDeep(subItems(sub_item_table[i]), label)
             if found then return found end
         end
     end
@@ -1573,7 +1579,7 @@ check(keepsMenuOpen("Close Lardo") == false, "and leaving Lardo")
 check(keepsMenuOpen("Refresh (last: ") == false,
     "and refreshing, which is done to see the list afterwards")
 check(keepsMenuOpen("Clear the filter") == false, "and clearing the filter")
-local app_level = itemStartingWith(menu_items, "Application settings").sub_item_table
+local app_level = subItems(itemStartingWith(menu_items, "Application settings"))
 check(itemStartingWith(app_level, "Open Lardo instead").keep_menu_open == true,
     "and a switch stays where it is")
 
@@ -1587,108 +1593,29 @@ check(itemStartingWith(menu_items, "Back to the list").enabled_func() == true,
     "and live once a recipe is open")
 plugin.viewer = nil
 
-local connection = itemStartingWith(menu_items, "Connection").sub_item_table
+local connection = subItems(itemStartingWith(menu_items, "Connection"))
 check(itemStartingWith(connection, "Server address: http://mealie.lan:9000") ~= nil,
     "the server is one level in, where it is set",
     table.concat(dialogLabels({ buttons = {} }), ""))
-local screen_level = itemStartingWith(menu_items, "Screen").sub_item_table
+local screen_level = subItems(itemStartingWith(menu_items, "Screen"))
 check(itemStartingWith(screen_level, "Fonts: 24 pt") ~= nil, "the fonts say what they are set to")
 check(itemStartingWith(screen_level, "Keep the recipe on screen") ~= nil,
     "and so does what keeps the screen awake, wherever the menu was opened from")
 
---== a tab of our own in KOReader's menu ==================================
--- KOReader's menu is a row of tabs with an icon each, and the row is a table
--- `require` hands out -- so a plugin can add one. Off by default: it is
--- somebody else's menu.
+--== Lardo's place in KOReader's menu =====================================
+-- One entry under Tools, the way plugins usually sit; the row of tabs is
+-- KOReader's and stays as it was.
 local menu_order = require("ui/elements/filemanager_menu_order")
 local tab_items = {}
-plugin.settings:saveSetting("own_menu_tab", nil)
 plugin:addToMainMenu(tab_items)
 check(tab_items.lardo ~= nil and tab_items.lardo.sorting_hint == "tools",
-    "off: one entry under Tools, the way plugins usually sit")
+    "one entry under Tools, the way plugins usually sit")
 check(tab_items.lardo.icon == nil, "and no tab icon")
 local in_row = false
 for i = 1, #menu_order["KOMenu:menu_buttons"] do
     if menu_order["KOMenu:menu_buttons"][i] == "lardo" then in_row = true end
 end
 check(in_row == false, "and nothing added to KOReader's row of tabs")
-
-plugin.settings:saveSetting("own_menu_tab", true)
-tab_items = {}
-plugin:addToMainMenu(tab_items)
-check(tab_items.lardo ~= nil and tab_items.lardo.icon ~= nil,
-    "on: a tab with an icon of its own", tab_items.lardo and tab_items.lardo.icon)
-check(tab_items.lardo.sub_item_table == nil,
-    "whose contents come from the order, not from a sub_item_table")
-check(type(menu_order.lardo) == "table" and #menu_order.lardo > 3,
-    "which lists our entries by id", menu_order.lardo and #menu_order.lardo)
-check(tab_items[menu_order.lardo[1]] ~= nil, "and every one of those ids is published",
-    menu_order.lardo[1])
-check(menu_order["KOMenu:menu_buttons"][#menu_order["KOMenu:menu_buttons"]] == "lardo",
-    "the tab goes at the end of the row, so KOReader's own tab indices do not shift",
-    table.concat(menu_order["KOMenu:menu_buttons"], " "))
-
--- and the menu opens straight into it
-local opened_tab
-local tabbed_menu = {
-    tab_item_table = { { id = "tools" }, { id = "lardo" } },
-    onShowMenu = function(_self, tab_index) opened_tab = tab_index end,
-}
-plugin.ui = { menu = tabbed_menu }
-plugin:showKOReaderMenu()
-check(opened_tab == 2, "pressing Menu lands on our tab rather than three presses away",
-    tostring(opened_tab))
-
--- switched off again, the row is left as it was found
-plugin.settings:saveSetting("own_menu_tab", nil)
-tab_items = {}
-plugin:addToMainMenu(tab_items)
-in_row = false
-for i = 1, #menu_order["KOMenu:menu_buttons"] do
-    if menu_order["KOMenu:menu_buttons"][i] == "lardo" then in_row = true end
-end
-check(in_row == false, "the tab is taken back out of a row that is not ours",
-    table.concat(menu_order["KOMenu:menu_buttons"], " "))
-check(menu_order.lardo == nil, "and so is what it listed")
-
--- ...and the whole way through, which is the only way it is ever used. A tab is
--- a change to the row of tabs, so it appears only once KOReader has built its
--- menu again -- and that build is exactly what used to die, with the tab never
--- appearing and the menu unopenable for the rest of the session.
-plugin.settings:saveSetting("own_menu_tab", nil)
-local tabbing_menu = newKOReaderMenu()
-plugin.ui = { menu = tabbing_menu }
-tabbing_menu:setUpdateItemTable() -- the build KOReader does on the way in
-local function ourTab(menu)
-    for i = 1, #(menu.tab_item_table or {}) do
-        if menu.tab_item_table[i].id == "lardo" then return menu.tab_item_table[i], i end
-    end
-end
-check(ourTab(tabbing_menu) == nil, "no tab of ours until it is asked for")
-
-local function pressOwnTabSwitch()
-    local switch = findItemDeep(plugin:menuItemsToTouchMenu(plugin:getMenuItems()),
-        "Own tab in KOReader's menu")
-    check(switch ~= nil, "the switch for it is in the menu")
-    switch.callback({ updateItems = function() end })
-end
-pressOwnTabSwitch()
-local menu_ok, menu_err = pcall(function() plugin:showKOReaderMenu() end)
-check(menu_ok, "switching it on and opening the menu again keeps the menu alive",
-    tostring(menu_err))
-local our_tab, at = ourTab(tabbing_menu)
-check(our_tab ~= nil, "the tab is in the row now")
-check(our_tab and our_tab.icon == "book.opened", "with an icon of its own",
-    our_tab and tostring(our_tab.icon))
-check(our_tab and #our_tab.sub_item_table > 3, "and our entries inside it",
-    our_tab and #our_tab.sub_item_table)
-check(tabbing_menu.shown_index == at, "and the menu opens straight into it",
-    tostring(tabbing_menu.shown_index) .. " of " .. tostring(at))
-check(#tabbing_menu.tab_item_table == 6,
-    "next to every one of KOReader's own, which the rebuild had to hand back",
-    #tabbing_menu.tab_item_table)
-
-
 
 do
     -- KOReader asks each plugin for its entries inside a pcall of its own and, on a
@@ -1710,14 +1637,8 @@ do
     if plugin.browser then plugin.browser:onCloseAllMenus() end
     plugin.browser = nil
     plugin.getMenuItems = real_get_menu_items
-    plugin.ui = { menu = tabbing_menu }
 end
 
-pressOwnTabSwitch() -- and off again
-plugin:showKOReaderMenu()
-check(ourTab(tabbing_menu) == nil, "switched off, the tab goes away")
-check(#tabbing_menu.tab_item_table == 5, "leaving the row it was added to",
-    #tabbing_menu.tab_item_table)
 do
     -- Every contributed plugin announces itself to the menu *order* at load
     -- time (`ui/plugin/insert_menu`). That is what makes MenuSorter **place**
@@ -1736,11 +1657,6 @@ do
     check(listed(require("ui/elements/reader_menu_order")),
         "and the reader's too, which insert_menu fills in with the same call")
 
-    local free_switch = findItemDeep(plugin:menuItemsToTouchMenu(plugin:getMenuItems()),
-        "Own tab in KOReader's menu")
-    check(free_switch and free_switch.enabled_func and free_switch.enabled_func() == true,
-        "with nothing fixing the row of tabs, that switch is there to be used")
-
     local placed = newKOReaderMenu()
     plugin.ui = { menu = placed }
     placed:setUpdateItemTable()
@@ -1748,117 +1664,20 @@ do
         "so the very first build puts it where every other plugin is",
         tostring(whereIsLardo(placed)))
 
-    -- one place or the other, never both: the sorter puts the contents in
-    -- whichever it finds first and leaves an empty row behind in the other
-    plugin.settings:saveSetting("own_menu_tab", true)
-    local tabbed = newKOReaderMenu()
-    plugin.ui = { menu = tabbed }
-    tabbed:setUpdateItemTable()
-    check(whereIsLardo(tabbed) == "a tab", "a tab of its own when that is asked for",
-        tostring(whereIsLardo(tabbed)))
-    check(listed(menu_order) == false, "and then no longer under More tools as well")
-    plugin.settings:saveSetting("own_menu_tab", nil)
-
-    -- The device this came from: a menu order file fixes the row of tabs and
-    -- does not know us, so a tab cannot survive the sort -- and claiming one
-    -- costs the entry under Tools, which is the only place left. That file is
-    -- the one thing that can be read *before* the build, so read it.
-    local order_path = test_dir .. "/koreader/settings/filemanager_menu_order.lua"
-    local row = '{ "filemanager_settings", "setting", "tools", "search", "main" }'
-    local order_file = io.open(order_path, "w")
-    order_file:write('return { ["KOMenu:menu_buttons"] = ' .. row .. ' }\n')
-    order_file:close()
-    plugin.menu_order_file = order_path
-    plugin.tab_survives = nil -- read once per plugin; this is a new device
-    plugin.settings:saveSetting("own_menu_tab", true)
-    local fixed = newKOReaderMenu()
-    fixed.user_order = { ["KOMenu:menu_buttons"] = {
-        "filemanager_settings", "setting", "tools", "search", "main" } }
-    plugin.ui = { menu = fixed }
-    fixed:setUpdateItemTable()
-    check(whereIsLardo(fixed) == "tools/more_tools",
-        "a tab that cannot survive is not claimed, and the entry stays where it is found",
-        tostring(whereIsLardo(fixed)))
-    check(fixed.builds == 1, "at the first build, with nothing opened first", fixed.builds)
-
-    -- and nothing is said about it: we did not ask for a tab, so a menu
-    -- without one is not news. The switch says it instead, by being greyed.
-    UIManager.shown = {}
-    plugin:showKOReaderMenu()
-    check(#UIManager.shown == 0,
-        "a tab never claimed is not reported as one that went missing",
-        #UIManager.shown)
-    local switch = findItemDeep(plugin:menuItemsToTouchMenu(plugin:getMenuItems()),
-        "Own tab in KOReader's menu")
-    check(switch and switch.enabled_func and switch.enabled_func() == false,
-        "the switch for a tab that cannot be is greyed out, not tickable and inert")
-
-    -- the answer comes off the disk, so it is read once rather than on every
-    -- repaint of a menu that asks
-    os.remove(order_path)
-    check(plugin:tabWouldSurvive() == false,
-        "and read once, not again for every menu that asks")
-
-    plugin.settings:saveSetting("own_menu_tab", nil)
-    plugin.menu_order_file = nil
-    plugin.tab_survives = nil -- the answer belongs with the file it came from
-    plugin.ui = { menu = fake_ko_menu }
+    -- the rebuild a language change asks for hands KOReader its row back
+    plugin:dropMenuCache()
+    local rebuilt = pcall(function() plugin:showKOReaderMenu() end)
+    check(rebuilt and #placed.tab_item_table == 5 and whereIsLardo(placed) == "tools/more_tools",
+        "and a rebuild finds every tab and Lardo where they were",
+        tostring(placed.tab_item_table and #placed.tab_item_table))
 end
 
 do
-    -- A menu customiser writes `settings/filemanager_menu_order.lua`, and
-    -- `MenuSorter:mergeAndSort` copies that file over the order module *after*
-    -- every plugin's addToMainMenu has run. So a row of tabs we added ourselves
-    -- while building is gone by the time the row is read -- our tab can never
-    -- appear, and because the tab path publishes no entry under Tools either,
-    -- Lardo is nowhere in the menu at all. Which is what a Kindle with
-    -- `menu_customizer` installed reported, while one without it was fine.
-    local customised = newKOReaderMenu()
-    customised.user_order = {
-        ["KOMenu:menu_buttons"] = { -- the row as the customiser saved it: no us
-            "filemanager_settings", "setting", "tools", "search", "main",
-        },
-    }
-    plugin.ui = { menu = customised }
-    plugin.settings:saveSetting("own_menu_tab", true)
-    customised:setUpdateItemTable()
-    check(whereIsLardo(customised) == "orphaned into filemanager_settings",
-        "our tab is dropped, and what it published is swept into the first tab "
-        .. "under a NEW: prefix -- reachable, and nowhere anyone would look",
-        tostring(whereIsLardo(customised)))
-
-    -- So the tab has to be checked *after* the build, which is the only moment
-    -- anyone can tell, and given up on for the session when it did not take --
-    -- and said out loud, because a switch that can be turned on and then does
-    -- nothing, with nothing on the screen about it, is the worst of the three.
-    UIManager.shown = {}
-    plugin:showKOReaderMenu()
-    local told = UIManager.shown[#UIManager.shown]
-    check(told and told.text and told.text:find("could not be added", 1, true) ~= nil,
-        "the tab it could not have is said out loud, not only logged",
-        told and tostring(told.text))
-    check(whereIsLardo(customised) == "tools/more_tools",
-        "asked for the menu, Lardo gives the tab up and takes the entry it can have",
-        tostring(whereIsLardo(customised)))
-    check(plugin:usesOwnMenuTab() == true,
-        "without unsetting what the user asked for -- another KOReader may allow it")
-    local builds_before = customised.builds
-    plugin:showKOReaderMenu()
-    check(customised.builds == builds_before,
-        "and it does not go round again on every press", customised.builds)
-
-    plugin.settings:saveSetting("own_menu_tab", nil)
-end
-
-do
-    -- The same file can also *hide* an id: `KOMenu:disabled`, which MenuSorter
-    -- deletes from the flat table before orphan handling -- so it never lands
-    -- anywhere and nothing is logged. Our entry and our tab share the id
-    -- `lardo`, so one line in that file hides both, and Lardo is in neither
-    -- Tools nor More tools while ticking the tab changes nothing either. That
-    -- is somebody's own configuration, so we do not fight it -- we say so,
-    -- once, and name the file it is in.
-    plugin.settings:saveSetting("own_menu_tab", nil)
+    -- A menu customiser can also *hide* an id: `KOMenu:disabled`, which
+    -- MenuSorter deletes from the flat table before orphan handling -- so it
+    -- never lands anywhere and nothing is logged. That is somebody's own
+    -- configuration, so we do not fight it -- we say so, once, and name the
+    -- file it is in.
     local hidden = newKOReaderMenu()
     -- as the customiser writes it: a hidden id is left out of its section and
     -- listed as disabled, so it cannot come back as an orphan either
@@ -1885,11 +1704,21 @@ do
     order_file:close()
     plugin.menu_order_file = order_path
     UIManager.shown = {}
+    local shown_when_opened
+    local real_show = hidden.onShowMenu
+    hidden.onShowMenu = function(self_, ...)
+        shown_when_opened = #UIManager.shown
+        return real_show(self_, ...)
+    end
     plugin:showKOReaderMenu()
+    hidden.onShowMenu = real_show
     local said = UIManager.shown[#UIManager.shown]
     check(said and said.text and said.text:find("filemanager_menu_order", 1, true) ~= nil,
         "Lardo says it is missing from the menu, and names the file that leaves it out",
         said and tostring(said.text))
+    check(shown_when_opened == 0,
+        "on top of the menu, not under it where it would be read too late",
+        tostring(shown_when_opened))
     UIManager.shown = {}
     plugin:showKOReaderMenu()
     check(#UIManager.shown == 0, "and says it once, not on every press", #UIManager.shown)
@@ -1897,7 +1726,6 @@ do
     plugin.menu_order_file = nil
 end
 
-plugin.settings:saveSetting("own_menu_tab", nil)
 plugin.ui = { menu = fake_ko_menu }
 
 --== KOReader's own menu presses every one of our buttons =================
@@ -1919,7 +1747,7 @@ local function pressAll(items, depth)
             local ok, err = pcall(item.callback, fake_touchmenu)
             if not ok then table.insert(broke, tostring(err)) end
         end
-        if item.sub_item_table and depth < 2 then pressAll(item.sub_item_table, depth + 1) end
+        if subItems(item) and depth < 2 then pressAll(subItems(item), depth + 1) end
     end
 end
 -- pressing everything changes everything, so put it all back afterwards
@@ -1943,7 +1771,7 @@ local function findBlank(items, path)
         local item = items[i]
         local label = item.text_func and item.text_func() or item.text
         if label == nil or label == "" then table.insert(blank, path .. "#" .. i) end
-        if item.sub_item_table then findBlank(item.sub_item_table, path .. (label or "?") .. " > ") end
+        if subItems(item) then findBlank(subItems(item), path .. (label or "?") .. " > ") end
     end
 end
 findBlank(plugin:menuItemsToTouchMenu(plugin:getMenuItems()), "")
@@ -1954,105 +1782,32 @@ check(fake_touchmenu.updated > 0,
 if plugin.browser then plugin.browser:onCloseAllMenus() end
 UIManager.shown = {}
 
---== a "book" in the library that opens Lardo =============================
--- KOReader's own mechanism for this: an auxiliary provider. FileManager asks
--- the registry who opens a file and, for one of those, calls
--- `self[provider]:openFile(file)` -- `self` being the file manager, `provider`
--- our plugin's name.
-local DocumentRegistry = require("document/documentregistry")
-check(DocumentRegistry.known_providers["lardo"] ~= nil,
-    "the plugin registers itself as something that can open a file")
-check(DocumentRegistry.filetype_provider["lardo"] == true,
-    "and registers the file type it owns, which is what makes one visible")
--- KOReader builds a plugin again for every book opened and closed, while the
--- registry lives as long as KOReader does: registering on each of those would
--- grow the list it walks for every file in every folder.
-local registered_types = #DocumentRegistry.providers
-plugin:registerProvider()
-plugin:registerProvider()
-check(#DocumentRegistry.providers == registered_types,
-    "once, however many times the plugin is started", #DocumentRegistry.providers)
-
--- FileManager:registerModule renames the instance the moment it registers it
--- ("filemanager" .. name), so self.name is not the key anything can be looked
--- up by once the plugin is running -- the file manager finds us by the name it
--- registered, and the registry by the one we registered.
-local real_plugin_name = plugin.name
-plugin.name = "filemanagerlardo"
-check(plugin:isFileTypeSupported("/mnt/us/Recipes.lardo") == true,
-    "it offers itself for its own shortcut")
-check(plugin:isFileTypeSupported("/mnt/us/War and Peace.epub") == false,
-    "and for nothing else, so the Open with dialog stays honest")
-
-local shortcut_dir = test_dir .. "/library"
-os.execute("mkdir -p '" .. shortcut_dir .. "'")
-plugin.ui = { file_chooser = { path = shortcut_dir }, refreshed = 0 }
-plugin.ui.onRefresh = function(this) this.refreshed = this.refreshed + 1 end
-check(plugin:findShortcut() == nil, "no shortcut in a folder that has none")
-
-local created = plugin:createShortcut()
-check(created ~= nil and created:sub(1, #shortcut_dir) == shortcut_dir,
-    "it is written into the folder on screen", tostring(created))
-check(io.open(created) ~= nil, "and it is a real file, so the library can list it")
-check(created:match("[^/]+$") == "Lardo.lardo", "named after the plugin it opens",
-    created:match("[^/]+$"))
-
--- The question the file browser asks about every file it lists, with the
--- argument it really passes: a bare name, never a path. A shortcut that was
--- written, associated, and invisible all the same came down to this one call.
-check(DocumentRegistry:hasProvider(created:match("[^/]+$")) == true,
-    "and the browser will list it, which is the whole point of writing it")
-check(DocumentRegistry:hasProvider("War and Peace.xyz") == false,
-    "without laying claim to anything else")
-
--- ...and why saying only who we are never could: the filter skips a provider
--- that has an `order`, and an `order` is exactly what makes one auxiliary
-local aux = DocumentRegistry:getProviderFromKey("lardo")
-DocumentRegistry.filetype_provider["lardo"] = nil -- as if the type were not ours
-DocumentRegistry:setProvider("Anything.lardo", aux, true)
-check(DocumentRegistry:hasProvider("Anything.lardo") == false,
-    "an association on its own leaves the file invisible, which is where this started")
-DocumentRegistry.filetype_provider["lardo"] = true
-
--- a tap on it goes to us as a plugin, not to a document engine
-local tapped = DocumentRegistry:getProvider(created, true)
-check(tapped ~= nil and tapped.provider == "lardo" and tapped.order ~= nil,
-    "and a tap on it reaches us, as an auxiliary provider",
-    tapped and tostring(tapped.provider))
-check(plugin.ui.refreshed == 1, "the folder on screen is listed again, or it would not show")
-check(plugin:findShortcut() == created, "and it is found the next time we look")
-
-plugin.browser = nil
-plugin:openFile(created)
-check(plugin.browser ~= nil, "opening it opens the recipe list")
-plugin.browser:onCloseAllMenus()
-
--- and it can be put somewhere else, taking the file with it
-local other_dir = test_dir .. "/library2"
-os.execute("mkdir -p '" .. other_dir .. "'")
-plugin:chooseShortcutDir()
-local chooser = UIManager.shown[#UIManager.shown]
-check(chooser.stub_name == "pathchooser", "the folder is picked, not typed",
-    tostring(chooser.stub_name))
-chooser:confirm(other_dir)
-check(io.open(created) == nil, "the old one does not stay behind")
-local moved = plugin:findShortcut()
-check(moved ~= nil and moved:sub(1, #other_dir) == other_dir,
-    "and it is where it was moved to", tostring(moved))
-local purged = require("docsettings").purged
-local purged_the_old_one = false
-for i = 1, #purged do
-    if purged[i] == created then purged_the_old_one = true end
+--== the library shortcut of earlier versions is cleared away =============
+-- Without the file type that made it visible, Lardo.lardo is a file nothing
+-- shows and nothing opens; it goes, with its sidecar, once per process.
+do
+    local shortcut_dir = test_dir .. "/library"
+    os.execute("mkdir -p '" .. shortcut_dir .. "'")
+    local old_path = shortcut_dir .. "/Lardo.lardo"
+    local f = assert(io.open(old_path, "w"))
+    f:write("Opening this in KOReader opens Lardo.\n")
+    f:close()
+    local book_path = shortcut_dir .. "/War and Peace.epub"
+    f = assert(io.open(book_path, "w"))
+    f:write("x")
+    f:close()
+    plugin.settings:saveSetting("shortcut_dir", shortcut_dir)
+    Lardo.old_shortcut_checked = false
+    plugin:removeOldShortcut()
+    check(io.open(old_path) == nil, "the old shortcut is removed from the folder it was put in")
+    local purged = require("docsettings").purged or {}
+    check(purged[#purged] == old_path, "and its sidecar with it", tostring(purged[#purged]))
+    local book = io.open(book_path)
+    check(book ~= nil, "and nothing else in that folder is touched")
+    if book then book:close() end
+    os.remove(book_path)
+    plugin.settings:saveSetting("shortcut_dir", nil)
 end
-check(purged_the_old_one,
-    "and whatever sidecar an earlier version left beside it purged with it")
-
-plugin:removeShortcut()
-check(plugin:findShortcut() == nil, "and it can be taken away again")
-plugin.settings:saveSetting("shortcut_dir", nil)
-os.remove(created)
-plugin.ui = nil
-plugin.name = real_plugin_name
 
 --== keeping the recipe on screen =========================================
 -- A Kindle blanks the screen ten minutes after the last thing its firmware
@@ -2149,58 +1904,32 @@ DevicePowerD.capacity = 42
 UIManager:runScheduled()
 check(plugin.viewer.status_text == "A  42%",
     "and every tick brings the corner up to date with it", plugin.viewer.status_text)
--- the corner is arranged in one window, not a dialog that closes and reopens on
--- every tick: the same SortWidget the button rows use. Opened the way a reader
--- opens it -- through KOReader's menu, which hands the entry its TouchMenu
--- instance, and that is half of what this is about.
+-- what the corner shows is ticked in KOReader's menu, one line per item, in
+-- the one order it is drawn in. Opened the way a reader opens it -- through
+-- KOReader's menu, which hands the entry its TouchMenu instance.
 local corner_menu = plugin:menuItemsToTouchMenu(plugin:getMenuItems())
 local function findByLabel(items, prefix)
     for i = 1, #items do
         local label = items[i].text_func and items[i].text_func() or items[i].text or ""
         if tostring(label):sub(1, #prefix) == prefix then return items[i] end
-        if items[i].sub_item_table then
-            local found = findByLabel(items[i].sub_item_table, prefix)
+        if subItems(items[i]) then
+            local found = findByLabel(subItems(items[i]), prefix)
             if found then return found end
         end
     end
 end
 local corner_entry = findByLabel(corner_menu, "Status in the corner:")
-check(corner_entry ~= nil and corner_entry.sub_item_table ~= nil,
+local corner_level = corner_entry and subItems(corner_entry)
+check(corner_level ~= nil,
     "the corner is a level of its own in KOReader's menu")
-local order_entry = findByLabel(corner_entry.sub_item_table, "Order…")
-check(order_entry ~= nil, "with the order one window further")
-order_entry.callback({ updateItems = function() end })
-local corner = UIManager.shown[#UIManager.shown]
-check(corner.stub_name == "sortwidget", "the corner is arranged in one window",
-    tostring(corner.stub_name))
-local corner_labels = {}
-for i = 1, #corner.item_table do corner_labels[i] = corner.item_table[i].label end
-check(table.concat(corner_labels, " ") == "awake battery clock wifi",
-    "with everything it can show, in the order it shows it",
-    table.concat(corner_labels, " "))
--- the window puts things in order and nothing else: what is switched on is
--- ticked in the menu, where the whole line is the target rather than a
--- checkbox the size of a fingernail
-check(corner.item_table[1].checked_func == nil,
-    "no checkboxes in the arranging window any more")
-local clock_tick = findByLabel(corner_entry.sub_item_table, "Clock")
+check(#corner_level == 4, "with a line per thing it can show, and nothing else", #corner_level)
+local clock_tick = findByLabel(corner_level, "Clock")
 check(clock_tick ~= nil and clock_tick.checked_func() == false,
     "the clock is ticked in the menu, and is not ticked to begin with")
 clock_tick.callback({ updateItems = function() end })
 check(clock_tick.checked_func() == true, "and one press of its line switches it on")
-
-corner:moveItem(3, 1)  -- clock dragged to the front
-local shown_before_accept = #UIManager.shown
-corner:accept()
--- SortWidget's tick keeps its window open while an item is picked up for
--- moving; reopening the menu we came from lands it on top of the window
-check(#UIManager.shown == shown_before_accept,
-    "accepting an arrangement does not open the menu over the window",
-    #UIManager.shown .. " vs " .. shown_before_accept)
-check(plugin.viewer.status_text:sub(1, 5) == os.date("%H:%M"),
-    "what was dragged to the front is drawn first", plugin.viewer.status_text)
-check(plugin.viewer.status_text:find("42%%") ~= nil, "and the rest keeps its place",
-    plugin.viewer.status_text)
+check(plugin.viewer.status_text == "A  42%  " .. os.date("%H:%M"),
+    "drawn after the battery, in the one order the corner has", plugin.viewer.status_text)
 
 plugin:toggleStatusItem("battery")
 check(plugin.viewer.status_text:find("42%%") == nil, "one can still be switched off on its own",
@@ -2232,6 +1961,19 @@ plugin:toggleStatusItem("wifi")
 plugin.settings:saveSetting("status_items", nil)
 plugin.settings:saveSetting("status_order", nil)
 plugin.viewer:setStatus(plugin:statusText())
+
+-- a recipe left open under the screensaver: KOReader's AutoSuspend unschedules
+-- its own timers on Suspend, and ours used to keep ticking on every wakeup
+UIManager.event_hook.fired.InputEvent = 0
+plugin:onSuspend()
+check(#UIManager.scheduled == 0, "going to sleep stops the nudging", #UIManager.scheduled)
+check(require("pluginshare").pause_auto_suspend == true,
+    "but the recipe is still open, so KOReader's own sleep stays held off for after")
+plugin:onResume()
+check(#UIManager.scheduled == 1, "waking up with the recipe open starts it again",
+    #UIManager.scheduled)
+check(UIManager.event_hook.fired.InputEvent == 1, "and says it straight away",
+    UIManager.event_hook.fired.InputEvent)
 
 -- closing the recipe puts the device back the way it was
 plugin.viewer.close_callback()
@@ -2265,20 +2007,6 @@ check(hasLabel(allMenuLabels(), "Status in the corner: Awake, Battery") ~= nil,
     "along with what the corner shows",
     hasLabel(allMenuLabels(), "Status in the corner: "))
 
---== a KOReader without SortWidget cannot arrange, and says so ============
-local real_sortwidget = package.loaded["ui/widget/sortwidget"]
-package.loaded["ui/widget/sortwidget"] = nil
-package.preload["ui/widget/sortwidget"] = function() error("no such widget") end
-local order_in_menu = findByLabel(
-    plugin:menuItemsToTouchMenu(plugin:getMenuItems()), "Order…")
-check(order_in_menu.enabled_func() == false, "without it, the Order entry is grey")
-plugin:showStatusSortDialog()
-local fallback = UIManager.shown[#UIManager.shown]
-check(fallback.stub_name == "infomessage", "and pressing it anyway says why",
-    tostring(fallback.stub_name))
-package.preload["ui/widget/sortwidget"] = nil
-package.loaded["ui/widget/sortwidget"] = real_sortwidget
-
 --== one menu, and it is KOReader's ========================================
 local list_labels = allMenuLabels()
 -- the top level is what is used while cooking, plus three categories
@@ -2293,7 +2021,7 @@ check(hasLabel(top_list, "Filter: ") ~= nil and hasLabel(top_list, "Refresh (las
     "what is used while cooking stays one press away")
 check(hasLabel(list_labels, "Back to the list") ~= nil, "a recipe is left through it")
 check(hasLabel(list_labels, "Browse recipes") ~= nil, "and the list is opened through it")
-for _i, label in ipairs({ "Fonts: ", "Offline: ", "Language: ", "Shortcut in the library: " }) do -- luacheck: ignore _i
+for _i, label in ipairs({ "Fonts: ", "Offline: ", "Language: " }) do -- luacheck: ignore _i
     check(hasLabel(list_labels, label) ~= nil, "and every setting is in it: " .. label)
 end
 
@@ -2408,6 +2136,80 @@ plugin:refreshList()
 check(NetworkMgr.after_action_count == 1,
     "and so does a failed one, or the radio would stay on", NetworkMgr.after_action_count)
 
+-- A Kindle does not turn Wi-Fi off on the way into the screensaver, and a
+-- Kindle Keyboard asleep with it on drains its battery. A radio our download
+-- switched on goes off on suspend; one that was already on is the user's.
+NetworkMgr.wifi_on = false
+NetworkMgr.disable_count = 0
+local real_connected = NetworkMgr.runWhenConnected
+NetworkMgr.runWhenConnected = function(self, cb) self.wifi_on = true; cb() end
+next_responses = { { code = 200, body = '{items={},total=0,total_pages=1}' } }
+plugin:refreshList()
+plugin:onSuspend()
+check(NetworkMgr.disable_count == 1 and NetworkMgr.wifi_on == false,
+    "Wi-Fi switched on for a download goes off when the device goes to sleep",
+    NetworkMgr.disable_count)
+plugin:onSuspend()
+check(NetworkMgr.disable_count == 1, "and only once, however many Suspends come",
+    NetworkMgr.disable_count)
+plugin:onResume()
+
+NetworkMgr.wifi_on = true
+NetworkMgr.disable_count = 0
+next_responses = { { code = 200, body = '{items={},total=0,total_pages=1}' } }
+plugin:refreshList()
+plugin:onSuspend()
+check(NetworkMgr.disable_count == 0 and NetworkMgr.wifi_on == true,
+    "Wi-Fi that was on before the download is left alone", NetworkMgr.disable_count)
+plugin:onResume()
+
+NetworkMgr.wifi_on = false
+next_responses = { { code = 200, body = '{items={},total=0,total_pages=1}' } }
+plugin:refreshList()
+plugin:onNetworkDisconnected()  -- "Action when done" or the user hung it up
+NetworkMgr.wifi_on = true       -- and the user switched it on again later
+plugin:onSuspend()
+check(NetworkMgr.disable_count == 0,
+    "once the radio has been down, a later one is not ours", NetworkMgr.disable_count)
+plugin:onResume()
+
+-- The power button half-way through a sync: the radio is ours from the moment
+-- it came up, the loop stops, and nothing is drawn or asked on the screensaver.
+plugin:forgetAllRecipes()
+NetworkMgr.wifi_on = false
+NetworkMgr.disable_count = 0
+NetworkMgr.after_action_count = 0
+request_count = 0
+local Trapper = require("ui/trapper")
+local real_info = Trapper.info
+local infos = 0
+Trapper.info = function(self, ...)
+    infos = infos + 1
+    if infos == 2 then plugin:onSuspend() end -- the downloads' first progress
+    return real_info(self, ...)
+end
+local shown_before_sync = #UIManager.shown
+plugin.settings:saveSetting("auto_sync", true)
+next_responses = {
+    { code = 200, body = '{items={{slug="a",name="A",updatedAt="t1"},{slug="b",name="B",updatedAt="t1"},' ..
+        '{slug="c",name="C",updatedAt="t1"}},total=3,total_pages=1}' },
+    { code = 200, body = '{slug="a",name="A",updatedAt="t1",recipeInstructions={{text="A"}}}' },
+}
+plugin:refreshList()
+Trapper.info = real_info
+plugin.settings:saveSetting("auto_sync", false)
+check(NetworkMgr.disable_count == 1, "falling asleep mid-sync still hangs the radio up",
+    NetworkMgr.disable_count)
+check(request_count == 1, "and the sync stops instead of carrying on under the screensaver",
+    request_count)
+check(NetworkMgr.after_action_count == 0, "with no Wi-Fi question waiting on the screensaver",
+    NetworkMgr.after_action_count)
+check(#UIManager.shown == shown_before_sync, "and no summary drawn over it",
+    #UIManager.shown - shown_before_sync)
+plugin:onResume()
+NetworkMgr.runWhenConnected = real_connected
+NetworkMgr.wifi_on = true
+
 -- A connection that went away mid-sync (the usual reason: the device fell
 -- asleep) must not be retried once per remaining recipe -- every one of those
 -- blocks for the socket timeout with KOReader waiting on it.
@@ -2472,6 +2274,149 @@ check(#UIManager.ticks == 0, "once per KOReader run, not once per plugin instanc
     #UIManager.ticks)
 plugin.settings:saveSetting("auto_refresh", false)
 UIManager.ticks = {}
+
+--== the review of 2026-11-15 =============================================
+-- the K3 keyboard has no Polish letters, and "zurek" has to find "Żurek"
+plugin.list = {
+    Recipe.normalizeSummary({ slug = "zurek", name = "Żurek" }),
+    Recipe.normalizeSummary({ slug = "salatka", name = "Sałatka", tags = { { name = "Obiad" } } }),
+}
+plugin.sorted_list = nil
+plugin.filter = "zurek"
+items = plugin:buildItemTable()
+check(#items == 1 and items[1].recipe and items[1].recipe.slug == "zurek",
+    "typed without accents, the filter finds the name with them", #items)
+plugin.filter = "sałat" -- and a touch keyboard that has them still works
+items = plugin:buildItemTable()
+check(#items == 1 and items[1].recipe and items[1].recipe.slug == "salatka",
+    "and typed with them, too", #items)
+plugin.filter = nil
+plugin:buildItemTable()
+
+-- the next recipe is worked out when the key is pressed, not when the recipe
+-- was opened: a refresh in between may have changed the list
+next_responses = {}
+plugin:cacheRecipe(Recipe.normalizeFull({ slug = "zurek", name = "Żurek", updatedAt = "" }))
+plugin:cacheRecipe(Recipe.normalizeFull({ slug = "salatka", name = "Sałatka", updatedAt = "" }))
+plugin.viewer = nil
+plugin:openRecipe(plugin.current_list[2]) -- Żurek, second by name
+check(plugin.current_recipe and plugin.current_recipe.slug == "zurek", "Żurek is open")
+plugin.list = { plugin.list[2], plugin.list[1],
+    Recipe.normalizeSummary({ slug = "barszcz", name = "Barszcz" }) }
+plugin.sorted_list = nil
+plugin:buildItemTable() -- Barszcz, Sałatka, Żurek
+plugin:stepRecipe(-1)
+check(plugin.current_recipe and plugin.current_recipe.slug == "salatka",
+    "the previous recipe is the one before it on the list as it is now",
+    plugin.current_recipe and plugin.current_recipe.slug)
+
+-- the header alone follows the corner: the recipe's text is not laid out again
+local text_before = plugin.viewer.text_widget
+plugin.viewer:setStatus("12:34")
+check(plugin.viewer.text_widget == text_before and not text_before.freed,
+    "a new status redraws the header, not the recipe below it")
+
+-- a pause on KOReader's sleep is lifted only by whoever set it
+plugin.viewer.close_callback()
+plugin.viewer = nil
+local share = require("pluginshare")
+share.pause_auto_suspend = true -- autoturn, say
+plugin:stopKeepAwake()
+check(share.pause_auto_suspend == true, "another plugin's pause on sleep is left alone")
+share.pause_auto_suspend = false
+
+-- woken with keep-awake off, the corner still catches up
+plugin.settings:saveSetting("keep_awake", false)
+plugin:openRecipe({ slug = "salatka" }) -- stored, so no network
+plugin:toggleStatusItem("clock")
+plugin.viewer.status_text = "stale"
+plugin:onSuspend()
+plugin:onResume()
+check(plugin.viewer.status_text ~= "stale", "waking up redraws the corner either way",
+    plugin.viewer.status_text)
+plugin:toggleStatusItem("clock")
+plugin.viewer.close_callback()
+plugin.viewer = nil
+plugin.settings:saveSetting("keep_awake", nil)
+
+-- a recipe that cannot be written leaves the copy that was there
+local good = Recipe.normalizeFull({ slug = "zurek", name = "Żurek", updatedAt = "t9",
+    recipeInstructions = { { text = "Gotuj." } } })
+check(plugin:cacheRecipe(good) == true, "a recipe is stored")
+local real_open = io.open
+io.open = function(path, mode)
+    if path:find("zurek", 1, true) and mode == "wb" then
+        return { write = function() return nil, "No space left on device" end,
+                 close = function() return true end }
+    end
+    return real_open(path, mode)
+end
+local stored = plugin:cacheRecipe(Recipe.normalizeFull({ slug = "zurek", name = "Żurek", updatedAt = "t10" }))
+io.open = real_open
+check(stored == false, "a full disk is reported as a failure")
+local kept = plugin:getCachedRecipe("zurek")
+check(kept and kept.steps and kept.steps[1] and kept.steps[1].text == "Gotuj.",
+    "and the copy that worked is still there to cook from")
+check(plugin:cachedStamp("zurek") == "t9", "with its own stamp", plugin:cachedStamp("zurek"))
+
+-- a token from a password is renewed with the password, not reported as rejected
+writeConf("url = http://mealie.lan:9000\ntoken = expired\nusername = u\npassword = p\n")
+plugin:importConfigFile(true)
+next_responses = {
+    { code = 401, status = "401 Unauthorized" },
+    { code = 200, body = '{access_token="fresh"}' },
+    { code = 200, body = '{items={},total=0,total_pages=1}' },
+}
+local errors_before = #UIManager.shown
+plugin:refreshList()
+check(plugin.settings:readSetting("token") == "fresh", "an expired token is renewed",
+    plugin.settings:readSetting("token"))
+local last_shown = UIManager.shown[#UIManager.shown]
+check(not (last_shown and last_shown.text and last_shown.text:find("rejected", 1, true)),
+    "and the refresh goes through", last_shown and last_shown.text)
+
+-- a new address without a token of its own starts from a fresh login
+writeConf("url = http://other.lan\nusername = u\npassword = p\n")
+plugin:importConfigFile(true)
+check(plugin.settings:readSetting("token") == nil, "the old server's token is dropped",
+    plugin.settings:readSetting("token"))
+local imported_creds = plugin:importConfigFile(true)
+check(imported_creds == true, "a file with only a login counts as imported")
+os.remove(conf_path)
+plugin:importConfigFile(true)
+
+-- Down after a page turn into a short last page must not jump back, and in a
+-- chapter shorter than a page it must not set a first line below 1
+do
+    local LardoViewT = require("lardoview")
+    local short = LardoViewT:new{ chapters = { { id = "description", title = "D", text = "one\ntwo" } } }
+    short:onLardoScrollLine(1)
+    check(short.text_widget.virtual_line_num == 1, "a short chapter does not scroll at all",
+        short.text_widget.virtual_line_num)
+    local long_text = {}
+    for i = 1, 60 do long_text[i] = "line " .. i end
+    local long = LardoViewT:new{ chapters = { { id = "description", title = "D",
+        text = table.concat(long_text, "\n") } } }
+    local tw = long.text_widget
+    while tw.virtual_line_num + tw.lines_per_page <= #tw.vertical_string_list do
+        tw:scrollDown()
+    end
+    local at_end = tw.virtual_line_num
+    long:onLardoScrollLine(1)
+    check(tw.virtual_line_num == at_end, "Down with the last line on screen stays put",
+        at_end .. " -> " .. tw.virtual_line_num)
+end
+
+-- the gesture actions' names follow a language change
+local Dispatcher = require("dispatcher")
+plugin.settings:saveSetting("language", "pl-PL")
+plugin:applyLanguage()
+plugin:onDispatcherRegisterActions(true)
+check(Dispatcher.actions.lardo_recipes.title == "Lardo: przepisy",
+    "the action is renamed, not kept in the first language", Dispatcher.actions.lardo_recipes.title)
+plugin.settings:saveSetting("language", nil)
+plugin:applyLanguage()
+plugin:onDispatcherRegisterActions(true)
 
 print(string.format("%d checks, %d failures", checks, failures))
 os.exit(failures == 0 and 0 or 1)

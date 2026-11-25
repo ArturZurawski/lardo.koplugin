@@ -90,17 +90,36 @@ function Config:findFile()
     return nil
 end
 
+-- Notepad saves UTF-8 with a byte order mark, and with it in front the first
+-- key -- usually `url` -- is not a key at all
+local BOM = "\239\187\191"
+local function withoutBom(content)
+    if content:sub(1, 3) == BOM then return content:sub(4) end
+    return content
+end
+
 local function parse(content)
     local values = {}
+    content = withoutBom(content)
     for line in (content .. "\n"):gmatch("([^\n]*)\n") do
         line = line:gsub("\r", "")
         if not line:match("^%s*[#;]") then
             local key, value = line:match("^%s*([%w_%-]+)%s*[=:]%s*(.-)%s*$")
             if key then
                 local field = ALIASES[key:lower()]
-                if field then
-                    -- allow quoting, tokens themselves never contain quotes
-                    value = value:gsub('^"(.*)"$', "%1"):gsub("^'(.*)'$", "%1")
+                -- the first one counts: it is also the one update() rewrites,
+                -- so a value changed in the UI is not undone by a second line
+                -- further down
+                if field and values[field] == nil then
+                    local quoted = value:match('^"(.*)"$') or value:match("^'(.*)'$")
+                    if quoted then
+                        -- quotes keep everything, a " #" in a password included
+                        value = quoted
+                    else
+                        -- "url = http://… # the kitchen one": the note is not
+                        -- part of the address
+                        value = value:gsub("%s+#.*$", "")
+                    end
                     if value ~= "" then
                         values[field] = value
                     end
@@ -201,7 +220,7 @@ function Config:update(updates)
     end
 
     local out = {}
-    local body = existing:gsub("\r\n", "\n"):gsub("\n$", "")
+    local body = withoutBom(existing):gsub("\r\n", "\n"):gsub("\n$", "")
     if body ~= "" then
         for line in (body .. "\n"):gmatch("([^\n]*)\n") do
             local replaced = false

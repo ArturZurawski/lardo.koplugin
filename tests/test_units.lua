@@ -156,6 +156,29 @@ check(#empty == 1 and empty[1].text == "This recipe has no content.",
 check(Recipe.headerMeta(Recipe.normalizeFull({ slug = "e", name = "E" })) == "",
     "no header meta when there are no times")
 
+-- text that is not markup survives, and entities become letters, not gaps
+local cleaned = Recipe.normalizeFull({
+    slug = "c", name = "C",
+    description = "Gotuj <10 min, potem >5 min. <b>Z&oacute;&#322;ty</b> ser &#x17C;&oacute;&#322;ty &unknown; &frac12;",
+}).description
+check(cleaned == "Gotuj <10 min, potem >5 min. Zółty ser żółty &unknown; 1/2",
+    "a < that is not a tag stays, entities decode to UTF-8, unknown ones stay", cleaned)
+
+-- the filter folds what a Kindle keyboard cannot type
+check(Recipe.foldAccents("żurek sałatka ąćęłńóśźż crème") == "zurek salatka acelnoszz creme",
+    "accents folded for matching", Recipe.foldAccents("żurek sałatka ąćęłńóśźż crème"))
+
+-- Mealie v2: the yield is a number plus the words after it
+local v2 = Recipe.normalizeFull({ slug = "v", name = "V", recipeServings = 4,
+    recipeYieldQuantity = 12, recipeYield = "ciastek",
+    recipeInstructions = { { summary = "Ciasto", text = "Wymieszaj." } } })
+check(v2.recipe_yield == "12 ciastek", "yield quantity and text together", v2.recipe_yield)
+check(Recipe.normalizeFull({ slug = "v", name = "V", recipeYield = "2 loaves" }).recipe_yield == "2 loaves",
+    "a v1 yield is left as it is")
+contains(Recipe.toChapters(v2)[1].text, "Servings: 4", "servings shown")
+contains(Recipe.toChapters(v2)[1].text, "Yield: 12 ciastek", "and the yield beside them")
+check(v2.steps[1].text == "Ciasto\nWymieszaj.", "a step's summary goes in front of it", v2.steps[1].text)
+
 --========================================================================
 -- lardolang
 --========================================================================
@@ -166,7 +189,7 @@ check(Lang.baseCode("PL") == "pl", "base code lower-cased")
 check(Lang.baseCode(nil) == nil, "no code, no base")
 check(Lang.isSupported("pl-PL"), "Polish is supported")
 check(not Lang.isSupported("hu-HU"), "Hungarian has no wording yet")
-check(Lang.nameFor("pt-BR") == "Português", "endonym for the menu", Lang.nameFor("pt-BR"))
+check(Lang.nameFor("pl-PL") == "Polski", "endonym for the menu", Lang.nameFor("pl-PL"))
 check(Lang.nameFor("hu-HU") == "hu-HU", "unknown language shows its tag")
 
 -- every language must carry every key, or a recipe would render half-translated
@@ -211,6 +234,12 @@ check(values.token == "eyJhbGciOiJIUzI1NiJ9.abc-def_123", "token parsed and unqu
 check(values.username == "me@example.com", "username parsed with colon separator", values.username)
 check(values.password == "s3cr3t", "password parsed", values.password)
 check(values.ignored_key == nil, "unknown keys ignored")
+
+-- what Notepad and people write
+local noted = Config.parse("\239\187\191url = http://a.lan # the kitchen one\n" ..
+    "password = \"pass #word\"\nurl = http://b.lan\n")
+check(noted.url == "http://a.lan", "BOM ignored, trailing note dropped, first url wins", noted.url)
+check(noted.password == "pass #word", "a quoted value keeps its #", noted.password)
 
 local aliased = Config.parse("server=example.lan\r\napi_token=abc\r\n")
 check(aliased.url == "example.lan", "server alias", aliased.url)
@@ -375,7 +404,8 @@ package.loaded["socket.http"] = {
         if response.transport_error then
             return nil, response.transport_error
         end
-        return 1, response.code, {}, response.status or tostring(response.code)
+        if response.throw then error(response.throw) end
+        return 1, response.code, response.headers or {}, response.status or tostring(response.code)
     end,
 }
 package.loaded["socket"] = {
@@ -383,7 +413,9 @@ package.loaded["socket"] = {
         local values_ = { ... }
         local out = {}
         for i = n + 1, #values_ do out[#out + 1] = values_[i] end
-        return table.unpack and table.unpack(out) or unpack(out)
+        -- not `a and f() or g()`: that keeps only the first value
+        local unpack_ = table.unpack or unpack
+        return unpack_(out)
     end,
 }
 package.loaded["ltn12"] = {
@@ -467,6 +499,34 @@ contains(last_request.url, "/api/recipes/x%20y", "slug is url-encoded")
 
 local _n, errnoslug = api:getRecipe("")
 contains(errnoslug, "no identifier", "empty slug rejected")
+
+-- a password token expires; with a way to log in again, a 401 is renewed
+local renewing = LardoApi.new("http://host:9000", "old")
+local relogins = 0
+renewing.relogin = function() relogins = relogins + 1; return "new" end
+next_responses = {
+    { code = 401, status = "401 Unauthorized" },
+    { code = 200, body = '{slug="r",name="R"}' },
+}
+local renewed, renew_err = renewing:getRecipe("r")
+check(renewed ~= nil and renewed.slug == "r", "a rejected token is renewed and the request repeated",
+    renew_err)
+check(relogins == 1 and renewing.token == "new", "once, with the new token kept", relogins)
+check(last_request.headers["Authorization"] == "Bearer new", "and sent")
+next_responses = { { code = 401 }, { code = 401 } }
+local _r, still = renewing:getRecipe("r")
+contains(still, "rejected the credentials", "a second rejection is reported, not retried forever")
+check(relogins == 2, "one login per request", relogins)
+
+-- a login behind a redirect says where to go instead
+next_responses = { { code = 301, status = "301 Moved", headers = { location = "https://host/api/auth/token" } } }
+local _l, moved = LardoApi.new("host"):login("me", "pw")
+contains(moved, "https://host", "the redirect target is named")
+
+-- whatever LuaSocket throws comes back as a message
+next_responses = { { throw = "boom" } }
+local _b, thrown = api:getRecipe("x")
+contains(thrown, "boom", "a thrown error is reported")
 
 local unset, errunset = LardoApi.new(nil, nil):getRecipeList()
 check(unset == nil, "no url is an error")

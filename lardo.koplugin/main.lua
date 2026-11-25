@@ -12,7 +12,6 @@ as KOReader's start-up screen ("Start with: Lardo").
 local ButtonDialog = require("ui/widget/buttondialog")
 local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
-local DocumentRegistry = require("document/documentregistry")
 local Device = require("device")
 local Dispatcher = require("dispatcher")
 local InfoMessage = require("ui/widget/infomessage")
@@ -50,11 +49,6 @@ local function optionalWidget(name)
     return nil
 end
 
---- Whether there is anything to arrange things with on this KOReader.
-local function canArrange()
-    return optionalWidget("ui/widget/sortwidget") ~= nil
-end
-
 local START_WITH_VALUE = "lardo"
 
 local DEFAULT_FONT_SIZE = 20
@@ -82,6 +76,14 @@ local PROGRESS_POSITIONS = {
 -- late on a device set to five, and nothing can be said at all once the
 -- screensaver is up.
 local KEEP_AWAKE_POKE_SECONDS = 4 * 60
+
+-- Whether the radio that is on right now was switched on for one of our
+-- downloads. Module-level rather than per instance: a refresh started from the
+-- file manager's instance can leave the radio on after that instance is gone
+-- (a book opened), and only one of the instances should hang it up on suspend.
+-- `sleeping` is the same kind of fact: between Suspend and Resume nothing of
+-- ours should draw, prompt, or carry on downloading.
+local wifi_state = { ours = false, sleeping = false }
 
 -- What the corner of a recipe's header shows besides its cooking time.
 local STATUS_ITEMS = {
@@ -191,27 +193,29 @@ function Lardo:loadSettings()
     if stored_in_settings then
         self:migrateRecipeCache(stored_in_settings)
     end
-    self:forgetButtonRowSettings()
+    self:forgetObsoleteSettings()
     self:importConfigFile(false)
     self:applyLanguage()
 end
 
---- Both screens used to carry a row of buttons -- where it sat, which buttons
--- were on it, in what order -- and none of that is read any more: the filter is
--- the line at the top or the keyboard, the menu is a tap on that line or the
--- Menu key, and the way out is in the menu. Settings nothing reads are the
--- settings-file version of dead code, so they go out once, on the way in.
-local BUTTON_ROW_SETTINGS = {
+--- Settings of features that are gone, and nothing reads any more: the rows
+-- of buttons on both screens (the filter is the line at the top or the
+-- keyboard, the menu is a tap on that line or the Menu key, the way out is in
+-- the menu), Lardo's own tab in KOReader's menu, and the order of the corner.
+-- Settings nothing reads are the settings-file version of dead code, so they
+-- go out once, on the way in. (`shortcut_dir` goes in removeOldShortcut, which
+-- still needs it to find the file.)
+local OBSOLETE_SETTINGS = {
     "buttons_position", "view_buttons", "view_button_order",
     "list_buttons_position", "list_buttons", "list_button_order",
-    "show_buttons",
+    "show_buttons", "own_menu_tab", "status_order",
 }
 
-function Lardo:forgetButtonRowSettings()
+function Lardo:forgetObsoleteSettings()
     local had_any = false
-    for i = 1, #BUTTON_ROW_SETTINGS do
-        if self.settings:readSetting(BUTTON_ROW_SETTINGS[i]) ~= nil then
-            self.settings:saveSetting(BUTTON_ROW_SETTINGS[i], nil)
+    for i = 1, #OBSOLETE_SETTINGS do
+        if self.settings:readSetting(OBSOLETE_SETTINGS[i]) ~= nil then
+            self.settings:saveSetting(OBSOLETE_SETTINGS[i], nil)
             had_any = true
         end
     end
@@ -241,8 +245,13 @@ function Lardo:importConfigFile(force)
         return false, path
     end
 
-    local imported = false
+    local imported = self.conf_credentials ~= nil
     if values.url then
+        -- a token belongs to the server that issued it: a new address without a
+        -- token of its own starts from a fresh login, not from a stale rejection
+        if values.url ~= self.settings:readSetting("url") and not values.token then
+            self.settings:saveSetting("token", nil)
+        end
         self.settings:saveSetting("url", values.url)
         imported = true
     end
@@ -277,8 +286,20 @@ function Lardo:persistToConfigFile(updates)
 end
 
 function Lardo:getApi()
-    return LardoApi.new(self.settings:readSetting("url"), self.settings:readSetting("token"),
+    local api = LardoApi.new(self.settings:readSetting("url"), self.settings:readSetting("token"),
         self:getLanguage())
+    -- A token obtained with a password expires (48 h on a default Mealie); with
+    -- the password at hand, a rejected token is renewed instead of reported.
+    if self:loginCredentials() then
+        api.relogin = function() return self:renewToken(api) end
+    end
+    return api
+end
+
+--- Username and password to log in with: lardo.conf's, or the ones typed into
+-- the login dialog this session (kept in memory only, never written anywhere).
+function Lardo:loginCredentials()
+    return self.conf_credentials or self.session_credentials
 end
 
 --- Language tag sent to Mealie as Accept-Language, and used for our own
@@ -354,8 +375,7 @@ end
 
 --- Makes KOReader build its menu again: a language change needs it (the help
 -- texts and our sub-menus are captured at build time; the labels themselves are
--- `text_func`, so those never go stale), and so does switching our own tab on
--- or off, which changes the row of tabs itself.
+-- `text_func`, so those never go stale).
 --
 -- Both halves have to go -- the sorted table and the flat one it was sorted
 -- from -- and the flat one has to go back to what it was *before* the first
@@ -377,19 +397,25 @@ function Lardo:isConfigured()
     return url ~= nil and url ~= ""
 end
 
---- Logs in with the credentials from lardo.conf when we have no token yet.
+--- Logs in with the known credentials when we have no token yet.
 function Lardo:ensureToken(api)
     if api:hasToken() then return true end
-    if not self.conf_credentials then return false end
-    local token, err = api:login(self.conf_credentials.username, self.conf_credentials.password)
+    return self:renewToken(api) ~= nil
+end
+
+--- Logs in again and stores the new token. @return the token, or nil
+function Lardo:renewToken(api)
+    local credentials = self:loginCredentials()
+    if not credentials then return nil end
+    local token, err = api:login(credentials.username, credentials.password)
     if not token then
         logger.warn("Lardo: automatic login failed:", err)
-        return false
+        return nil
     end
     api.token = token
     self.settings:saveSetting("token", token)
     self.settings:flush()
-    return true
+    return token
 end
 
 --==========================================================================
@@ -500,14 +526,30 @@ end
 function Lardo:cacheRecipe(recipe, no_flush)
     if not self:ensureRecipesDir() then return false end
     local path = self:recipePath(recipe.slug)
-    local file, err = io.open(path, "wb")
+    -- Into a file of its own first, and over the old one only once it is all
+    -- there: "wb" on the real file empties it before a byte is written, and a
+    -- full disk then costs the copy that worked -- the one you cook from
+    -- offline -- while its stamp says it is current.
+    local tmp = path .. ".tmp"
+    local file, err = io.open(tmp, "wb")
     if not file then
         logger.warn("Lardo: could not store", path, err)
         return false
     end
     -- the same shape LuaSettings writes, so it can be read back with dofile()
-    file:write("-- ", path, "\nreturn ", dump(recipe), "\n")
-    file:close()
+    local written, write_err = file:write("-- ", path, "\nreturn ", dump(recipe), "\n")
+    local closed, close_err = file:close()
+    if not written or not closed then
+        logger.warn("Lardo: could not store", path, write_err or close_err)
+        os.remove(tmp)
+        return false
+    end
+    local renamed, rename_err = os.rename(tmp, path)
+    if not renamed then
+        logger.warn("Lardo: could not store", path, rename_err)
+        os.remove(tmp)
+        return false
+    end
     self.stamps[recipe.slug] = recipe.updated_at or ""
     self.cache:saveSetting("stamps", self.stamps)
     if not no_flush then
@@ -528,7 +570,10 @@ function Lardo:forgetAllRecipes()
     for slug in pairs(self.stamps or {}) do
         os.remove(self:recipePath(slug))
     end
-    self.stamps = {}
+    -- emptied in place: whoever else holds this table must not write the old
+    -- stamps back later
+    for slug in pairs(self.stamps or {}) do self.stamps[slug] = nil end
+    self.stamps = self.stamps or {}
     self.cache:saveSetting("stamps", self.stamps)
     self.cache:flush()
 end
@@ -561,7 +606,14 @@ end
 -- Plugin plumbing
 --==========================================================================
 
-function Lardo:onDispatcherRegisterActions()
+--- @param retitle drop what is registered first: registerAction() ignores a
+-- name it already has, so the titles would stay in the language of the first
+-- registration
+function Lardo:onDispatcherRegisterActions(retitle)
+    if retitle and Dispatcher.removeAction then
+        Dispatcher:removeAction("lardo_recipes")
+        Dispatcher:removeAction("lardo_ingredients")
+    end
     Dispatcher:registerAction("lardo_recipes", {
         category = "none",
         event = "ShowLardoRecipes",
@@ -580,7 +632,7 @@ end
 function Lardo:init()
     self:loadSettings()
     self:onDispatcherRegisterActions()
-    self:registerProvider()
+    self:removeOldShortcut()
     if self.ui and self.ui.menu then
         self.ui.menu:registerToMainMenu(self)
     end
@@ -661,27 +713,9 @@ function Lardo:injectStartWith(menu_items)
     end
 end
 
---==========================================================================
--- A tab of our own in KOReader's menu
---
--- KOReader's menu is a row of tabs with an icon each -- file browser, settings,
--- tools, search. They are not hardcoded: the row is `order["KOMenu:menu_buttons"]`
--- in `ui/elements/filemanager_menu_order`, a module `require` caches, and a tab
--- is simply an entry in `menu_items` carrying an `icon`, whose contents come
--- from `order[<its id>]` -- a list of ids of other entries.
---
--- So a plugin can have one: add the id to that row, list our entries' ids under
--- it, and publish each entry separately. Then Menu can open straight into it,
--- which is the point -- Tools -> More tools -> Lardo is three presses from a
--- screen that *is* Lardo.
---
--- Off by default: it is somebody else's menu, and a tab is a loud thing to add
--- to it uninvited.
---==========================================================================
-
-local MENU_TAB_ID = "lardo"
--- the closest thing to a recipe book in KOReader's icon set
-local MENU_TAB_ICON = "book.opened"
+-- Lardo's id in KOReader's menu: under Tools -> More tools, like every
+-- contributed plugin.
+local MENU_ID = "lardo"
 
 -- Once per KOReader process, at load time, before any menu is built: this is
 -- how a contributed plugin gets into *Tools -> More tools*. It appends the id
@@ -690,138 +724,10 @@ local MENU_TAB_ICON = "book.opened"
 -- is visible to a menu customiser, which reads those orders. Relying on the
 -- orphan pass instead is what left Lardo out of the menu until it was opened
 -- once, while every other plugin on the same device appeared straight away.
-pcall(function() require("ui/plugin/insert_menu").add(MENU_TAB_ID) end)
+pcall(function() require("ui/plugin/insert_menu").add(MENU_ID) end)
 
-function Lardo:usesOwnMenuTab()
-    return self.settings:isTrue("own_menu_tab")
-end
-
---- Set when this KOReader turned out not to keep the tab we added.
---
--- `MenuSorter:mergeAndSort` reads `settings/<prefix>_menu_order.lua` -- what a
--- menu customiser writes -- and copies it over the order module *after* every
--- plugin's `addToMainMenu` has run. A row we added ourselves while building is
--- therefore gone by the time the row is read: the tab cannot appear, and since
--- the tab publishes no entry under Tools either, what it published is swept up
--- as orphans into the first tab behind a "NEW: " prefix. Reachable, and nowhere
--- anybody would look for it.
---
--- Nothing can tell before the menu is built, so we look afterwards and stop
--- asking for the rest of the session. The *setting* is left alone: it is what
--- the user asked for, and another KOReader may well allow it.
-local tab_refused = false
--- ...and whether we have already said that Lardo is not in the menu at all.
+-- whether we have already said that Lardo is not in the menu at all
 local menu_gap_reported = false
-
---- @return the shared menu order module, or nil on a KOReader without it
-local function menuOrder()
-    local ok, order = pcall(require, "ui/elements/filemanager_menu_order")
-    if ok and type(order) == "table" and type(order["KOMenu:menu_buttons"]) == "table" then
-        return order
-    end
-    return nil
-end
-
---- Where our id sits in a list in the order: the row of tabs, or More tools.
-local function positionIn(list)
-    for i = 1, #(list or {}) do
-        if list[i] == MENU_TAB_ID then return i end
-    end
-    return nil
-end
-
-local function tabRowPosition(order)
-    return positionIn(order["KOMenu:menu_buttons"])
-end
-
---- Under *Tools → More tools*, where every contributed plugin lives.
---
--- `ui/plugin/insert_menu` is how one gets there: it appends the id to
--- `more_tools` in both order modules, and being *in the order* is what makes
--- MenuSorter place an entry properly rather than sweep it up as an orphan --
--- and what lets a menu customiser, which reads those orders, see it at all.
--- Every contributed plugin on the device does this at load time, which is why
--- theirs appear where they should and ours did not.
---
--- Never both places at once: with our id in `more_tools` *and* in the row of
--- tabs, MenuSorter places the contents in whichever it finds first and leaves
--- an empty row behind in the other.
-local function inMoreTools(order, present)
-    local list = order and order.more_tools
-    if type(list) ~= "table" then return end
-    local at = positionIn(list)
-    if present and not at then
-        table.insert(list, MENU_TAB_ID)
-    elseif at and not present then
-        table.remove(list, at)
-    end
-end
-
---- Takes the tab back out of KOReader's menu row. The row is shared and lives
--- as long as KOReader does, so switching this off has to undo it.
-local function removeMenuTab()
-    local order = menuOrder()
-    if not order then return end
-    local at = tabRowPosition(order)
-    if at then table.remove(order["KOMenu:menu_buttons"], at) end
-    order[MENU_TAB_ID] = nil
-    inMoreTools(order, true) -- back where a plugin belongs
-end
-
---- Would a tab of ours survive the sort?
---
--- `mergeAndSort` copies the user's menu order file over the order *after* we
--- have had our say, so if that file names the row of tabs and we are not in it,
--- the tab cannot be there -- and claiming it costs us the entry under Tools as
--- well, which is the only place left. That file is the one thing that can be
--- read *before* the build, so read it.
--- The answer is kept (`self.tab_survives`) because it comes out of a file on
--- disk and `enabled_func` is re-read on every repaint of the menu: a `dofile`
--- per repaint is not what a Kindle should spend its time on. The file belongs
--- to another plugin, and changing it needs a restart to take effect anyway.
-function Lardo:tabWouldSurvive()
-    if self.tab_survives ~= nil then return self.tab_survives end
-    local survives = true
-    local path = self:menuOrderFile()
-    if path then
-        local ok, order = pcall(dofile, path)
-        if ok and type(order) == "table" then
-            local row = order["KOMenu:menu_buttons"]
-            -- a file that says nothing about the row leaves ours alone
-            if type(row) == "table" then survives = positionIn(row) ~= nil end
-        end
-    end
-    self.tab_survives = survives
-    return survives
-end
-
---- Publishes our entries as a tab: one `menu_items` entry per top-level item,
--- because that is where MenuSorter takes a tab's contents from.
--- @return whether there is a tab now
-function Lardo:installMenuTab(menu_items)
-    local order = menuOrder()
-    if not order or not self:tabWouldSurvive() then return false end
-
-    local items = self:menuItemsToTouchMenu(self:getMenuItems())
-    local ids = {}
-    for i = 1, #items do
-        local id = MENU_TAB_ID .. "_" .. i
-        menu_items[id] = items[i]
-        ids[i] = id
-    end
-    order[MENU_TAB_ID] = ids
-    menu_items[MENU_TAB_ID] = {
-        icon = MENU_TAB_ICON,
-        text = _("Lardo"),
-    }
-    if not tabRowPosition(order) then
-        -- at the end: inserting anywhere else would shift the indices KOReader
-        -- remembers as "the tab you had open last"
-        table.insert(order["KOMenu:menu_buttons"], MENU_TAB_ID)
-    end
-    inMoreTools(order, false) -- a tab *or* an entry, never both
-    return true
-end
 
 --- KOReader asks each plugin for its entries inside a `pcall` of its own
 -- (`pcall(widget.addToMainMenu, widget, self.menu_items)`, and on a failure it
@@ -835,8 +741,7 @@ function Lardo:addToMainMenu(menu_items)
     local ok, err = pcall(function() self:buildMenuEntry(menu_items) end)
     if not ok then
         logger.err("Lardo: the menu entry could not be built:", err)
-        removeMenuTab() -- whatever we cannot build, we should not claim a tab for
-        menu_items[MENU_TAB_ID] = {
+        menu_items[MENU_ID] = {
             text = _("Lardo"),
             text_func = function() return _("Lardo") end,
             sorting_hint = "tools",
@@ -857,20 +762,7 @@ function Lardo:addToMainMenu(menu_items)
 end
 
 function Lardo:buildMenuEntry(menu_items)
-    -- Whether this build asked for a tab at all. Only then is a menu without
-    -- one something to report: with the tab turned on but known to be
-    -- impossible (see tabWouldSurvive) we never claimed one, and a menu that
-    -- has not got what we did not ask for is not news.
-    self.tab_claimed = false
-    -- a tab belongs to the file manager's menu; the reader's is a different
-    -- menu with a different order, and a recipe list is not a page in a book
-    if self:usesOwnMenuTab() and not tab_refused and self.document == nil
-            and self:installMenuTab(menu_items) then
-        self.tab_claimed = true
-        return
-    end
-    removeMenuTab()
-    menu_items.lardo = {
+    menu_items[MENU_ID] = {
         -- text_func is what gets drawn (Menu.getMenuText prefers it, so the
         -- entry follows a language change); text is for MenuSorter, which sorts
         -- and tags the top-level entries by their plain text.
@@ -884,7 +776,7 @@ end
 --- Is Lardo anywhere in the menu KOReader has built?
 --
 -- `MenuSorter` writes an item's id into the table it builds for it, ours
--- included, wherever it ended up -- a tab of its own, Tools, More tools.
+-- included, wherever it ended up -- Tools or More tools.
 -- @param tabs `tab_item_table`: the tabs, each an array of the items in it
 local function menuHasLardo(tabs, depth)
     depth = depth or 0
@@ -892,7 +784,7 @@ local function menuHasLardo(tabs, depth)
     for i = 1, #tabs do
         local entry = tabs[i]
         if type(entry) == "table" then
-            if entry.id == MENU_TAB_ID then return true end
+            if entry.id == MENU_ID then return true end
             -- Tools -> More tools -> Lardo is three, and a menu deeper than
             -- that is somebody else's problem
             if depth < 4 and menuHasLardo(entry.sub_item_table or entry, depth + 1) then
@@ -908,23 +800,11 @@ end
 -- `MenuSorter:mergeAndSort` reads it and copies it over the menu order, and
 -- anything listed in its `KOMenu:disabled` is **deleted** from the flat table
 -- before orphan handling -- so an id in there is gone from the menu with no
--- error and no trace. Our entry and our tab share the id `lardo`, so one line
--- in that file hides both, which is what "Lardo is in neither Tools nor More
--- tools, and the tab does nothing either" turned out to be.
+-- error and no trace, which is what "Lardo is in neither Tools nor More tools"
+-- turned out to be.
 function Lardo:menuOrderFile()
     local path = self.menu_order_file
     if path and lfs.attributes(path, "mode") == "file" then return path end
-    return nil
-end
-
---- Which tab of KOReader's menu is ours, if any. MenuSorter writes the id of a
--- tab into the table it builds for it, which is what this reads back.
-function Lardo:menuTabIndex(menu)
-    local tabs = menu and menu.tab_item_table
-    if not tabs then return nil end
-    for i = 1, #tabs do
-        if tabs[i].id == MENU_TAB_ID then return i end
-    end
     return nil
 end
 
@@ -975,10 +855,8 @@ end
 -- to be given to *both* of them: handing KOReader's raw TouchMenu instance to
 -- an entry that calls it is an attempt to call a table, which takes KOReader
 -- down with it.
--- @param in_place true when the menu asking for it is still on screen behind
---   the callback (KOReader's own), false when the callback replaced it
-local function refreshHandle(update, in_place)
-    return setmetatable({ updateItems = function() update() end, in_place = in_place },
+local function refreshHandle(update)
+    return setmetatable({ updateItems = function() update() end },
         { __call = function() update() end })
 end
 
@@ -1024,59 +902,34 @@ function Lardo:showKOReaderMenu()
     -- `enabled_func` and `checked_func` every time it draws, which is why the
     -- entries that follow what is on screen are written that way.
     --
-    -- Where a rebuild *is* the point -- a language change, the tab going on or
-    -- off, the tab turning out not to be allowed -- it goes through
+    -- Where a rebuild *is* the point -- a language change -- it goes through
     -- `dropMenuCache`, which hands back the skeleton the sorter ate.
     ensureMenuBuilt(menu)
-    -- The tab was asked for, the menu is built, and it is not in it: this
-    -- KOReader's row of tabs is not ours to add to (see `tab_refused`). Give it
-    -- up and build once more, which is the build that puts Lardo under Tools.
-    if self.tab_claimed and not tab_refused
-            and menu.tab_item_table and self:menuTabIndex(menu) == nil then
-        local order = menuOrder()
-        -- Worth knowing which it was: our id still in the order module means
-        -- the row was overruled at sort time (a menu order file); our id gone
-        -- from it means something took it out while KOReader was running.
-        logger.warn("Lardo: the tab did not survive the sort; still in the order row:",
-            tostring(order ~= nil and tabRowPosition(order) ~= nil))
-        tab_refused = true
-        self:dropMenuCache()
-        ensureMenuBuilt(menu)
-        -- Said, not just logged: a switch that can be turned on and then does
-        -- nothing, with nothing on the screen about it, is the worst of the
-        -- three. We know this happened -- we asked for the tab and the built
-        -- menu has not got it -- so say that much, and name the file if there
-        -- is one to name rather than guess at a culprit.
-        local order_file = self:menuOrderFile()
-        self:showError(order_file
-            and T(_("Lardo's own tab could not be added to KOReader's menu.\n\nIts layout is fixed by:\n%1\n\nLardo is under Tools instead."),
-                order_file)
-            or _("Lardo's own tab could not be added to KOReader's menu: something else on this device decides how it is laid out.\n\nLardo is under Tools instead."))
-    end
     -- Built, and Lardo is nowhere in it. Nothing failed -- an id in a menu
     -- order file's `KOMenu:disabled` is deleted before the sort even looks at
     -- it -- so without this the menu simply opens without us and there is no
     -- way left to reach a single setting. Said once, and only when that file is
     -- really there: otherwise it is a guess, and a guess is worse than silence.
+    local warning
     if menu.tab_item_table and not menuHasLardo(menu.tab_item_table) then
         local order_file = self:menuOrderFile()
         logger.warn("Lardo: KOReader's menu was built without Lardo in it; order file:",
             tostring(order_file))
-        -- Only with the file in hand: without it we would be naming a cause we
-        -- have not got, and a guess is worse than silence. The flag is on the
-        -- *message*, so a file that turns up later is still reported once.
         if order_file and not menu_gap_reported then
             menu_gap_reported = true
-            self:showError(T(_("Lardo is missing from KOReader's menu.\n\nA menu order file leaves it out:\n%1\n\nSwitch Lardo back on in the plugin that wrote it, or delete the file."),
-                order_file))
+            warning = T(_("Lardo is missing from KOReader's menu.\n\nA menu order file leaves it out:\n%1\n\nSwitch Lardo back on in the plugin that wrote it, or delete the file."),
+                order_file)
         end
     end
-    local ok, err = pcall(function() menu:onShowMenu(self:menuTabIndex(menu)) end)
+    local ok, err = pcall(function() menu:onShowMenu() end)
     if not ok then
         logger.err("Lardo: KOReader's menu did not open:", err)
         self:showError(T(_("The menu could not be opened.\n\n%1"), tostring(err)))
         return false
     end
+    -- over the menu, not under it: a message the menu covers is read after the
+    -- menu is closed, when it no longer explains anything
+    if warning then self:showError(warning) end
     return true
 end
 
@@ -1182,13 +1035,24 @@ function Lardo:menuItemsToTouchMenu(items)
             -- behind rather than sit under it. Entries that change a setting
             -- where it stands ask for `keep_menu_open` themselves.
             keep_menu_open = item.keep_menu_open == true,
-            sub_item_table = item.sub_items and self:menuItemsToTouchMenu(item.sub_items()) or nil,
+            -- built when it is opened, not with the level above: KOReader
+            -- keeps its menu once built, and a level made in advance shows
+            -- what was true then (and costs a K3 every level, every build)
+            sub_item_table_func = item.sub_items
+                and function() return self:menuItemsToTouchMenu(item.sub_items()) end or nil,
             callback = item.callback and function(touchmenu_instance)
+                -- TouchMenu rebuilds the page itself after the callback of an
+                -- item with a checkmark; asking for it from inside the callback
+                -- too built every toggle twice. A later call -- after a dialog
+                -- the callback opened -- still goes through.
+                local in_callback = true
                 item.callback(refreshHandle(function()
+                    if in_callback and item.checked_func then return end
                     if touchmenu_instance and touchmenu_instance.updateItems then
                         touchmenu_instance:updateItems()
                     end
-                end, true))
+                end))
+                in_callback = false
             end or nil,
         })
     end
@@ -1274,33 +1138,6 @@ function Lardo:getApplicationMenuTable()
             end,
             title = _("Offline"),
             sub_items = function() return self:getOfflineMenuTable() end,
-        },
-        {
-            text_func = function()
-                local path = self:findShortcut()
-                return T(_("Shortcut in the library: %1"), path or _("none"))
-            end,
-            help_text = _("Puts a file in the library that opens Lardo when it is tapped, for getting here without the menu."),
-            title = _("Shortcut in the library"),
-            sub_items = function() return self:getShortcutMenuTable() end,
-        },
-        {
-            text_func = function() return _("Own tab in KOReader's menu") end,
-            help_text = _("Puts Lardo in the menu's top row, with an icon of its own, and opens the menu straight into it. Off means one entry under Tools, the way plugins usually sit. A plugin that customises the menu can make the tab impossible; Lardo then stays under Tools."),
-            -- Greyed where the row of tabs is fixed by a menu order file that
-            -- does not name us: there the tab cannot be, and a switch that can
-            -- be turned on and then does nothing is worse than one that says
-            -- so. Only that one cause can be known in advance -- every other
-            -- way of losing the tab is reported after the build instead.
-            enabled_func = function() return self:tabWouldSurvive() end,
-            checked_func = function() return self:usesOwnMenuTab() end,
-            keep_menu_open = true,
-            callback = function(on_change)
-                self.settings:saveSetting("own_menu_tab", not self:usesOwnMenuTab())
-                self.settings:flush()
-                self:dropMenuCache() -- it has to be built again to move
-                if on_change then on_change() end
-            end,
         },
         {
             text_func = function() return _("Open Lardo instead of the file browser at start-up") end,
@@ -1392,7 +1229,7 @@ end
 --- What the corner shows, in the order it shows it.
 function Lardo:statusItemsLabel()
     local shown = self:getStatusItems()
-    local definition = self:statusDefinition()
+    local definition = STATUS_ITEMS
     local parts = {}
     for i = 1, #definition do
         if shown[definition[i][1]] then
@@ -1402,17 +1239,14 @@ function Lardo:statusItemsLabel()
     return #parts > 0 and table.concat(parts, ", ") or _("nothing")
 end
 
---- One level down from "Status in the corner": a tick per thing it can show,
--- and the window that puts them in order.
+--- One level down from "Status in the corner": a tick per thing it can show.
 function Lardo:getStatusMenuTable()
     local items = {}
-    local definition = self:statusDefinition()
-    for i = 1, #definition do
-        local id, label = definition[i][1], definition[i][2]
+    for i = 1, #STATUS_ITEMS do
+        local id, label = STATUS_ITEMS[i][1], STATUS_ITEMS[i][2]
         table.insert(items, {
             text_func = function() return _(label) end,
             checked_func = function() return self:getStatusItems()[id] == true end,
-            separator = i == #definition,
             keep_menu_open = true,
             callback = function(on_change)
                 self:toggleStatusItem(id)
@@ -1420,13 +1254,6 @@ function Lardo:getStatusMenuTable()
             end,
         })
     end
-    table.insert(items, {
-        text_func = function() return _("Order…") end,
-        help_text = _("Drag them into the order the corner draws them in."),
-        enabled_func = function() return canArrange() end,
-        keep_menu_open = true,
-        callback = function(on_change) self:showStatusSortDialog(on_change) end,
-    })
     return items
 end
 
@@ -1438,6 +1265,7 @@ function Lardo:getLanguageMenuTable()
         self:persistToConfigFile({ language = tag or "" })
         self:reopenViewer() -- chapter titles come from the language
         self:dropMenuCache() -- ...and so do the menus
+        self:onDispatcherRegisterActions(true) -- and the gesture actions' names
         self:updateBrowserItems() -- and the list's own title and hints
     end
 
@@ -1593,7 +1421,7 @@ function Lardo:reloadConfigFile()
         })
     else
         UIManager:show(InfoMessage:new{
-            text = T(_("Read %1, but it contains no server address or token."), path),
+            text = T(_("Read %1, but it contains no server address, token or login."), path),
         })
     end
 end
@@ -1727,6 +1555,9 @@ function Lardo:doLogin(url, username, password)
             self:showError(err)
             return
         end
+        -- the token expires in two days; for as long as KOReader runs, it is
+        -- renewed with these instead of turning into "credentials rejected"
+        self.session_credentials = { username = username or "", password = password or "" }
         self.settings:saveSetting("token", token)
         self.settings:flush()
         local path = self:persistToConfigFile({ url = url, token = token })
@@ -1762,7 +1593,7 @@ function Lardo:testConnection()
             text = T(N_("Connected. %1 recipe on the server.", "Connected. %1 recipes on the server.", total), total),
             timeout = 3,
         })
-    end, true) -- the link is enough: reaching Mealie is what we are here to find out
+    end)
 end
 
 --- Shown when nothing is configured yet: points at the config file, because
@@ -1890,7 +1721,8 @@ function Lardo:sortedList()
         if #tags > 0 then
             parts[#parts + 1] = util.stringLower(table.concat(tags, ", "))
         end
-        haystacks[i] = #parts > 1 and table.concat(parts, "\n") or parts[1]
+        -- without accents: the keyboard that types into it has none
+        haystacks[i] = Recipe.foldAccents(#parts > 1 and table.concat(parts, "\n") or parts[1])
     end
 
     self.sorted_list, self.sorted_haystacks = sorted, haystacks
@@ -1903,7 +1735,7 @@ function Lardo:buildItemTable()
     local items = {}
     local shown = {}
 
-    local filter = self.filter and util.stringLower(self.filter) or nil
+    local filter = self.filter and Recipe.foldAccents(util.stringLower(self.filter)) or nil
     for i = 1, #sorted do
         local recipe = sorted[i]
         if not filter or haystacks[i]:find(filter, 1, true) then
@@ -2097,28 +1929,43 @@ end
 --- Brings the connection up, runs `body` in a Trapper coroutine (so it can show
 -- progress and be cancelled), and then hands back to KOReader's Wi-Fi settings.
 --
--- That last step is the point of this function: NetworkMgr:runWhenOnline() only
--- brings the connection *up*; "Action when done" is acted on by
--- afterWifiAction(), and only if the plugin calls it -- without it, Wi-Fi stayed
--- on after every download, whatever the setting said. It runs even when `body`
--- failed, so a broken download cannot leave the radio on either.
--- @param link_is_enough when the task only needs the radio up, not a working
---   route to the internet. NetworkMgr:runWhenOnline() decides with a DNS lookup
---   and, when the link is up but that lookup fails, drops the callback without a
---   word; runWhenConnected() only wants the link and guarantees the callback
---   runs. "Test connection" wants exactly that -- whether the Mealie server
---   answers is the question it is asked to report on, not a reason to stay quiet.
-function Lardo:runOnline(body, link_is_enough)
-    local go = NetworkMgr.runWhenConnected and link_is_enough
+-- That last step is the point of this function: bringing the connection up
+-- does not hang it up; "Action when done" is acted on by afterWifiAction(),
+-- and only if the plugin calls it -- without it, Wi-Fi stayed on after every
+-- download, whatever the setting said. It runs even when `body` failed, so a
+-- broken download cannot leave the radio on either.
+--
+-- runWhenConnected(), not runWhenOnline(): the second decides with a DNS lookup
+-- of a Microsoft host and, when the link is up but that lookup fails -- a
+-- Mealie on the home network behind a DNS filter, or no internet at all --
+-- drops the callback without a word. The server is what we need, and its
+-- answer (or its absence) says more than KOReader's guess about the internet.
+function Lardo:runOnline(body)
+    local go = NetworkMgr.runWhenConnected
         and function(cb) NetworkMgr:runWhenConnected(cb) end
         or function(cb) NetworkMgr:runWhenOnline(cb) end
+    local was_on = self:wifiIsOn()
     go(function()
+        -- Ours from the moment it is up, not from the end of the download: the
+        -- power button pressed half-way through a first sync is exactly when
+        -- the radio must not be left on (see onSuspend).
+        if not was_on then wifi_state.ours = true end
         Trapper:wrap(function()
             local ok, err = pcall(body)
             if not ok then
                 Trapper:clear()
                 logger.err("Lardo: network task failed:", err)
                 self:showError(T(_("Something went wrong:\n%1"), tostring(err)))
+            end
+            if wifi_state.sleeping then
+                -- onSuspend has already dealt with the radio; a "turn Wi-Fi
+                -- off?" box on the screensaver would wait there all night.
+                -- Close the bracket beforeWifiAction opened instead, or the
+                -- next afterWifiAction (anybody's) would act on it.
+                if NetworkMgr.clearBeforeActionFlag then
+                    pcall(function() NetworkMgr:clearBeforeActionFlag() end)
+                end
+                return
             end
             if NetworkMgr.afterWifiAction then
                 -- a KOReader without it simply leaves WiFi alone, as before
@@ -2201,6 +2048,9 @@ function Lardo:refreshList()
             added, updated, failed = self:downloadRecipes(todo)
         end
         Trapper:clear()
+        -- asleep: what arrived is kept, the next refresh fetches the rest, and
+        -- a summary on top of the screensaver helps nobody
+        if wifi_state.sleeping then return end
         self:reportRefresh(#self.list, added, updated, removed, failed)
     end)
 end
@@ -2216,6 +2066,24 @@ function Lardo:openRecipe(summary)
     self:showRecipeAt(index)
 end
 
+--- The next or previous recipe on the list, worked out when the key is
+-- pressed: a refresh while the recipe was open may have changed the list under
+-- it, and an index from opening time would land on something unrelated.
+function Lardo:stepRecipe(delta)
+    local list = self.current_list or {}
+    local count = #list
+    if count < 2 then return end
+    local index = self.current_index or 1
+    local slug = self.current_recipe and self.current_recipe.slug
+    for i = 1, count do
+        if list[i].slug == slug then
+            index = i
+            break
+        end
+    end
+    self:showRecipeAt((index - 1 + delta) % count + 1)
+end
+
 function Lardo:showRecipeAt(index)
     local summary = self.current_list and self.current_list[index]
     if not summary then return end
@@ -2229,8 +2097,10 @@ function Lardo:showRecipeAt(index)
         return
     end
     -- The stored copy is out of date, but a stale recipe beats nagging about
-    -- WiFi in the middle of cooking: only go online if we already are.
-    if cached and not NetworkMgr:isOnline() then
+    -- WiFi in the middle of cooking: only go online if we already are. "Are"
+    -- is the link, not isOnline(): that one is a DNS lookup on the UI thread,
+    -- on every open of a recipe, and wrong on a network without internet.
+    if cached and not self:isConnected() then
         self:displayRecipe(cached, index)
         return
     end
@@ -2242,6 +2112,15 @@ function Lardo:showRecipeAt(index)
         local raw, err = api:getRecipe(summary.slug)
         Trapper:clear()
         local recipe = raw and Recipe.normalizeFull(raw)
+        if wifi_state.sleeping then
+            -- fell asleep while it loaded: keep it for next time, but do not
+            -- open a recipe on top of the screensaver
+            if recipe then
+                if recipe.updated_at == "" then recipe.updated_at = summary.updated_at end
+                self:cacheRecipe(recipe, true)
+            end
+            return
+        end
         if not recipe then
             if cached then
                 self:displayRecipe(cached, index) -- fall back to what we have
@@ -2253,7 +2132,9 @@ function Lardo:showRecipeAt(index)
         if recipe.updated_at == "" then
             recipe.updated_at = summary.updated_at
         end
-        self:cacheRecipe(recipe)
+        -- the stamp goes to disk with the next FlushSettings; rewriting the
+        -- whole index with an fsync for one recipe opened is not worth it
+        self:cacheRecipe(recipe, true)
         self:displayRecipe(recipe, index)
     end
 
@@ -2272,234 +2153,46 @@ function Lardo:getFontSize()
     return self.settings:readSetting("font_size") or DEFAULT_FONT_SIZE
 end
 
---- A definition ({id, label} pairs) in the order it was arranged into: that
--- order first, then anything not in it -- something added by a later version
--- appears for everybody rather than only for people who never arranged theirs.
-local function inSavedOrder(definition, order)
-    if type(order) ~= "table" then return definition end
-    local by_id, ordered, taken = {}, {}, {}
-    for i = 1, #definition do by_id[definition[i][1]] = definition[i] end
-    for i = 1, #order do
-        local entry = by_id[order[i]]
-        if entry and not taken[order[i]] then
-            taken[order[i]] = true
-            table.insert(ordered, entry)
-        end
-    end
-    for i = 1, #definition do
-        if not taken[definition[i][1]] then table.insert(ordered, definition[i]) end
-    end
-    return ordered
-end
-
 function Lardo:getProgressPosition()
     return self.settings:readSetting("progress_position") or DEFAULT_PROGRESS_POSITION
 end
 
 --==========================================================================
--- A "book" in the library that opens Lardo
+-- The library shortcut, which is gone
 --
--- KOReader has a mechanism for exactly this: an *auxiliary provider* -- a
--- plugin that opens a file instead of a document engine (the text editor and
--- the archive viewer are the two in KOReader itself). FileManager:openFile()
--- asks DocumentRegistry which provider a file belongs to and, for an auxiliary
--- one, calls `self[provider]:openFile(file)` -- `self` being the file manager
--- and `provider` our plugin's name, which is how a tap on a file reaches us.
---
--- So the shortcut is a real file with nothing in it that matters, and a file
--- type that is ours.
---
--- **The type is what makes it visible**, and this took a working shortcut that
--- nobody could see to work out. The file browser's filter is
--- `file_filter = function(filename) return DocumentRegistry:hasProvider(filename) end`
--- -- a *bare name*, not a path. Of the three things `hasProvider` accepts, only
--- the first can answer a bare name:
---
--- 1. `filetype_provider[suffix]`, set by `addProvider(extension, ...)`;
--- 2. an association by file type, which is skipped for an auxiliary provider
---    (`if provider and (not provider.order or include_aux)`, and `order` is
---    precisely what makes a provider auxiliary);
--- 3. an association for that one file, which lives in its sidecar -- and a bare
---    filename cannot be resolved to one.
---
--- `addAuxProvider` alone, which is what we did, sets none of them: it says who
--- we are, not what we own. Registering the extension as well sets (1), and the
--- registry is safe to put an auxiliary provider in -- `getFallbackProvider`
--- only ever returns the `txt` one, so we cannot become the opener of last
--- resort, and `openDocument` pcalls `provider.new`, so a cover browser asking
--- our file for a thumbnail gets a warning in the log rather than a crash.
+-- Earlier versions could put a file, Lardo.lardo, in the library that opened
+-- Lardo when tapped. Without the file type that made it visible it is a file
+-- nothing shows and nothing opens, so it is taken away once, with its sidecar.
 --==========================================================================
 
-local SHORTCUT_SUFFIX = ".lardo"
--- Not translated, and not "Recipes": on a Kindle this sits among the books, and
--- the plugin it opens is called Lardo in every language.
-local SHORTCUT_NAME = "Lardo"
+local OLD_SHORTCUT = "Lardo.lardo"
+-- once per KOReader process, not once per book opened; on the class, so a
+-- test can ask again
+Lardo.old_shortcut_checked = false
 
--- The key FileManager looks us up by: it does `self[provider]:openFile(file)`,
--- and `self[...]` was set from the plugin's name in _meta.lua. It cannot be read
--- off `self.name`, which is only the plugin's name until it is registered:
--- `FileManager:registerModule` then overwrites it with "filemanager" .. name (and
--- ReaderUI does the same with "reader"), so by the time a menu entry is pressed,
--- self.name is "filemanagerlardo" and the registry knows nothing about it.
-local PROVIDER_KEY = "lardo"
-
--- The registry is a module and lives as long as KOReader does, while the plugin
--- is instantiated again for every book opened and closed. Registering twice
--- would append to `DocumentRegistry.providers` for the whole session.
-local provider_registered = false
-
-function Lardo:registerProvider()
-    if provider_registered or not DocumentRegistry.addAuxProvider then return end
-    local provider = {
-        provider_name = self.fullname or _("Lardo"),
-        provider = PROVIDER_KEY,
-        order = 40, -- what makes it auxiliary, and where it sits in "Open with…"
-        disable_file = false, -- "always use for this file" is the whole point
-        disable_type = false,
+function Lardo:removeOldShortcut()
+    if Lardo.old_shortcut_checked then return end
+    Lardo.old_shortcut_checked = true
+    local dirs = {
+        self.settings:readSetting("shortcut_dir"),
+        G_reader_settings and G_reader_settings:readSetting("home_dir"),
+        Device.home_dir,
     }
-    DocumentRegistry:addAuxProvider(provider) -- who we are
-    if DocumentRegistry.addProvider then
-        -- ...and what we own, which is the half that makes the file visible
-        DocumentRegistry:addProvider(SHORTCUT_SUFFIX:sub(2), "application/x-lardo",
-            provider, 100)
-    end
-    provider_registered = true
-end
-
---- Asked by the "Open with…" dialog before offering us for a file.
-function Lardo:isFileTypeSupported(file)
-    return type(file) == "string"
-        and file:lower():sub(-#SHORTCUT_SUFFIX) == SHORTCUT_SUFFIX
-end
-
---- What a tap on the shortcut does. The file itself is not read: it is a door.
-function Lardo:openFile(_file) -- luacheck: ignore
-    self:showBrowser()
-end
-
---- Where the shortcut goes: wherever it was pointed at, else the folder being
--- browsed, else KOReader's home.
-function Lardo:shortcutDir()
-    local chosen = self.settings:readSetting("shortcut_dir")
-    if chosen and chosen ~= "" then return chosen end
-    local chooser = self.ui and self.ui.file_chooser
-    if chooser and chooser.path and chooser.path ~= "" then return chooser.path end
-    local home = G_reader_settings and G_reader_settings:readSetting("home_dir")
-    if home and home ~= "" then return home end
-    return Device.home_dir or DataStorage:getDataDir()
-end
-
-function Lardo:shortcutPath()
-    return self:shortcutDir() .. "/" .. SHORTCUT_NAME .. SHORTCUT_SUFFIX
-end
-
---- @return the path of the shortcut, if there is one
-function Lardo:findShortcut()
-    local path = self:shortcutPath()
-    if lfs.attributes(path, "mode") == "file" then return path end
-    return nil
-end
-
---- Points it at another folder, and takes the shortcut with it if there is one.
-function Lardo:chooseShortcutDir(on_change)
-    local PathChooser = optionalWidget("ui/widget/pathchooser")
-    if not PathChooser then
-        self:showError(_("This KOReader version has no folder picker."))
-        return
-    end
-    UIManager:show(PathChooser:new{
-        select_directory = true,
-        select_file = false,
-        show_files = false,
-        path = self:shortcutDir(),
-        onConfirm = function(new_path)
-            if not new_path or new_path == "" then return end
-            local had_one = self:findShortcut()
-            if had_one then self:removeShortcut(true) end
-            self.settings:saveSetting("shortcut_dir", new_path)
-            self.settings:flush()
-            if had_one then
-                self:createShortcut() -- follow it, rather than leave it behind
+    for i = 1, 3 do
+        local path = dirs[i] and dirs[i] ~= "" and (dirs[i] .. "/" .. OLD_SHORTCUT)
+        if path and lfs.attributes(path, "mode") == "file" then
+            os.remove(path)
+            local ok, DocSettings = pcall(require, "docsettings")
+            if ok and DocSettings and DocSettings.open then
+                pcall(function() DocSettings:open(path):purge() end)
             end
-            if on_change then on_change() end
-        end,
-    })
-end
-
---- Writes the shortcut and tells KOReader that it is ours to open, which is
--- both what a tap on it does and what makes the file browser show it at all.
-function Lardo:createShortcut()
-    local path = self:shortcutPath()
-    local file, err = io.open(path, "w")
-    if not file then
-        logger.warn("Lardo: could not write", path, err)
-        self:showError(T(_("Could not write the shortcut:\n%1"), path))
-        return nil
+            logger.info("Lardo: removed the old library shortcut", path)
+        end
     end
-    file:write(_("Opening this in KOReader opens Lardo.\n"))
-    file:close()
-
-    -- No association is written into the file's sidecar: the *type* is ours, so
-    -- the browser lists it and a tap on it reaches us without one. Earlier
-    -- versions wrote one, which is why removing a shortcut still purges it.
-    -- the folder on screen was listed before the file existed
-    if self.ui and self.ui.onRefresh then
-        pcall(function() self.ui:onRefresh() end)
+    if dirs[1] then
+        self.settings:saveSetting("shortcut_dir", nil)
+        self.settings:flush()
     end
-    UIManager:show(InfoMessage:new{
-        text = T(_("Added to the library:\n%1\n\nOpening it opens Lardo."), path),
-    })
-    return path
-end
-
---- @param quietly true when it is being moved rather than thrown away
-function Lardo:removeShortcut(quietly)
-    local path = self:findShortcut()
-    if not path then return end
-    os.remove(path)
-    -- the sidecar is what made the file visible; it has nothing left to describe
-    local ok, DocSettings = pcall(require, "docsettings")
-    if ok and DocSettings and DocSettings.open then
-        pcall(function() DocSettings:open(path):purge() end)
-    end
-    if self.ui and self.ui.onRefresh then
-        pcall(function() self.ui:onRefresh() end)
-    end
-    if not quietly then
-        UIManager:show(InfoMessage:new{
-            text = T(_("Removed from the library:\n%1"), path),
-            timeout = 3,
-        })
-    end
-end
-
---- The shortcut: where it goes, and whether there is one.
-function Lardo:getShortcutMenuTable()
-    return {
-        {
-            text_func = function() return T(_("Folder: %1"), self:shortcutDir()) end,
-            keep_menu_open = true,
-            callback = function(on_change) self:chooseShortcutDir(on_change) end,
-        },
-        {
-            text_func = function() return _("Put the shortcut there") end,
-            enabled_func = function() return self:findShortcut() == nil end,
-            keep_menu_open = true,
-            callback = function(on_change)
-                self:createShortcut()
-                if on_change then on_change() end
-            end,
-        },
-        {
-            text_func = function() return _("Remove the shortcut") end,
-            enabled_func = function() return self:findShortcut() ~= nil end,
-            keep_menu_open = true,
-            callback = function(on_change)
-                self:removeShortcut()
-                if on_change then on_change() end
-            end,
-        },
-    }
 end
 
 --==========================================================================
@@ -2564,6 +2257,8 @@ end
 -- `os.execute` -- a forked process, on the UI thread, every few minutes. Saying
 -- it through KOReader costs nothing and cannot wedge anything.
 function Lardo:keepAwakeTick()
+    -- a tick that outlived its recipe says nothing: nobody is reading
+    if not self.viewer then return end
     local hook = UIManager.event_hook
     if hook and hook.execute and self:isKeepingAwake() then
         local ok, err = pcall(function() hook:execute("InputEvent") end)
@@ -2590,6 +2285,7 @@ function Lardo:startKeepAwake()
     -- would put the device to sleep with the recipe on screen; this is the flag
     -- its plugins use to say "not now" (autoturn.koplugin does the same).
     PluginShare.pause_auto_suspend = true
+    self.pausing_auto_suspend = true
     self:keepAwakeTick() -- once now, so a stale battery reading is not the first thing you see
 end
 
@@ -2597,12 +2293,12 @@ function Lardo:stopKeepAwake()
     if self.keep_awake_task then
         UIManager:unschedule(self.keep_awake_task)
     end
-    PluginShare.pause_auto_suspend = false
-end
-
---- What the corner can show, in the order it was arranged into.
-function Lardo:statusDefinition()
-    return inSavedOrder(STATUS_ITEMS, self.settings:readSetting("status_order"))
+    -- only a pause we asked for is ours to lift: autoturn and friends use the
+    -- same flag
+    if self.pausing_auto_suspend then
+        PluginShare.pause_auto_suspend = false
+        self.pausing_auto_suspend = false
+    end
 end
 
 --- One item of it, or nil when the device has nothing to say about it.
@@ -2637,7 +2333,7 @@ end
 -- can misread beats a box where a symbol should be.
 function Lardo:statusText()
     local shown = self:getStatusItems()
-    local definition = self:statusDefinition()
+    local definition = STATUS_ITEMS
     local parts = {}
     for i = 1, #definition do
         local id = definition[i][1]
@@ -2669,6 +2365,8 @@ end
 --- Redraws the corner of an open recipe. Cheap when nothing changed: the view
 -- compares the text before it rebuilds anything.
 function Lardo:refreshStatus()
+    -- nothing is drawn under the screensaver; onResume redraws anyway
+    if wifi_state.sleeping then return end
     if self.viewer and self.viewer.setStatus then
         self.viewer:setStatus(self:statusText())
     end
@@ -2681,13 +2379,67 @@ end
 function Lardo:onNetworkConnected()
     self:refreshStatus()
 end
-Lardo.onNetworkDisconnected = Lardo.onNetworkConnected
 
-function Lardo:saveStatusItems(order, enabled)
-    self.settings:saveSetting("status_order", order)
-    self.settings:saveSetting("status_items", enabled)
-    self.settings:flush()
+function Lardo:onNetworkDisconnected()
+    -- whoever brought it down, a radio that comes up again later is not ours
+    wifi_state.ours = false
     self:refreshStatus()
+end
+
+function Lardo:isConnected()
+    local check = NetworkMgr.isConnected or NetworkMgr.isOnline
+    local ok, connected = pcall(check, NetworkMgr)
+    return ok and connected == true
+end
+
+function Lardo:wifiIsOn()
+    if not NetworkMgr.isWifiOn then return false end
+    local ok, on = pcall(function() return NetworkMgr:isWifiOn() end)
+    return ok and on == true
+end
+
+--==========================================================================
+-- Going to sleep
+--
+-- KOReader's own AutoSuspend unschedules its timers in onSuspend ("we do not
+-- want auto suspend procedure to waste battery during suspend") and starts
+-- them again in onResume. The keep-awake tick has to do the same: left
+-- scheduled, it ran on every wakeup under the screensaver -- a rebuild of the
+-- whole recipe, a refresh queued under the screensaver, a fake keypress.
+--
+-- And Wi-Fi: on a Kobo, KOReader turns it off on the way into suspend; on a
+-- Kindle it does not (Kindle:intoScreenSaver leaves the radio to the
+-- framework), and a Kindle Keyboard asleep with Wi-Fi on drains in days what
+-- it otherwise would in weeks. So a radio our download switched on and that
+-- is still on goes off here. One the user switched on is left alone.
+--==========================================================================
+
+function Lardo:onSuspend()
+    wifi_state.sleeping = true
+    if self.keep_awake_task then
+        UIManager:unschedule(self.keep_awake_task)
+    end
+    if wifi_state.ours then
+        wifi_state.ours = false
+        if self:wifiIsOn() and NetworkMgr.disableWifi then
+            local ok, err = pcall(function() NetworkMgr:disableWifi() end)
+            if not ok then
+                logger.warn("Lardo: could not turn Wi-Fi off before suspend:", err)
+            end
+        end
+    end
+end
+
+function Lardo:onResume()
+    wifi_state.sleeping = false
+    -- the recipe is still on screen: carry on keeping it there, and redraw the
+    -- corner now, since the battery and the clock moved while we slept --
+    -- whether or not anything keeps the screen on
+    if self.viewer and self:keepsAwake() then
+        self:startKeepAwake()
+    else
+        self:refreshStatus()
+    end
 end
 
 --- Switches one corner item on, leaving the others as they are.
@@ -2713,6 +2465,9 @@ function Lardo:displayRecipe(recipe, index, chapter_index)
         UIManager:close(self.viewer)
         self.viewer = nil
     end
+    -- the old view is gone without its close_callback; if the new one fails to
+    -- build, nothing must be left holding KOReader's sleep off
+    self:stopKeepAwake()
     self.current_recipe = recipe
     self.current_index = index
 
@@ -2735,12 +2490,8 @@ function Lardo:displayRecipe(recipe, index, chapter_index)
             font_face = self.settings:readSetting("font_face"),
             progress_position = self:getProgressPosition(),
             status_text = self:statusText(),
-            next_recipe_callback = (count > 1) and function()
-                self:showRecipeAt(index < count and index + 1 or 1)
-            end or nil,
-            prev_recipe_callback = (count > 1) and function()
-                self:showRecipeAt(index > 1 and index - 1 or count)
-            end or nil,
+            next_recipe_callback = (count > 1) and function() self:stepRecipe(1) end or nil,
+            prev_recipe_callback = (count > 1) and function() self:stepRecipe(-1) end or nil,
             menu_callback = function() self:showKOReaderMenu() end,
             close_callback = function()
                 if self.viewer == viewer then
@@ -2785,7 +2536,11 @@ function Lardo:applyViewSetting(key, value, viewer_field)
     -- the fallback TextViewer has no rebuild(): its own menu handles fonts
     if self.viewer and self.viewer.rebuild then
         self.viewer[viewer_field] = value
-        self.viewer:rebuild()
+        if self.viewer.rebuildKeepingPlace then
+            self.viewer:rebuildKeepingPlace()
+        else
+            self.viewer:rebuild()
+        end
     end
     if key == "font_face" or key == "font_size" then
         self:applyBrowserFont()
@@ -2920,57 +2675,6 @@ function Lardo:showFontChooser(on_change)
     UIManager:show(menu)
 end
 
---- What a refresh still has to fetch after the index: only recipes that are
--- missing or whose updatedAt moved, so one list request is enough to know --
--- and the stamps mean not one stored recipe has to be opened to work it out.
---- One window for putting things in order: drag them where you want them.
---
--- KOReader's SortWidget can carry a checkbox per line as well, and it used to
--- carry ours -- but that checkbox is the *only* part of a line that toggles: a
--- tap anywhere else picks the line up to move it. On a 600 px screen that is a
--- small square to hit and a surprising thing to miss, and what it looks like is
--- "it will not switch on". So this window does one job, and what is switched on
--- is ticked in the menu, where the tick is the whole line.
---
--- @param spec title, definition ({id, English label} pairs, in order), save(order)
-function Lardo:showArrangeDialog(spec, on_change)
-    local SortWidget = optionalWidget("ui/widget/sortwidget")
-    if not SortWidget then
-        self:showError(_("This KOReader version cannot reorder them."))
-        return
-    end
-
-    local items = {}
-    for i = 1, #spec.definition do
-        items[i] = { text = _(spec.definition[i][2]), label = spec.definition[i][1] }
-    end
-
-    UIManager:show(SortWidget:new{
-        title = spec.title,
-        item_table = items,
-        callback = function()
-            -- SortWidget has reordered item_table in place by the time it calls us
-            local order = {}
-            for i = 1, #items do order[i] = items[i].label end
-            spec.save(order)
-            -- Only a menu still on screen behind this window wants redrawing;
-            -- reopening the one we replaced would land it on top.
-            if on_change and on_change.in_place then on_change() end
-        end,
-    })
-end
-
---- What the corner of a recipe's header shows, and in which order.
-function Lardo:showStatusSortDialog(on_change)
-    return self:showArrangeDialog({
-        title = _("Status in the corner"),
-        definition = self:statusDefinition(),
-        save = function(order)
-            self:saveStatusItems(order, self.settings:readSetting("status_items"))
-        end,
-    }, on_change)
-end
-
 --- A list of entries as a dialog, for the two places that are not the menu:
 -- the Sort button on the row, and anything else that has to ask a short
 -- question. A tick is KOReader's own `checked_func`, redrawn where it stands.
@@ -2978,7 +2682,7 @@ end
 function Lardo:showMenuDialog(title, items, go_back)
     local dialog
     local function reopen() self:showMenuDialog(title, items, go_back) end
-    local reopen_handle = refreshHandle(reopen, false)
+    local reopen_handle = refreshHandle(reopen)
 
     local ticks = {}
     local function redrawTicks()
@@ -2990,7 +2694,7 @@ function Lardo:showMenuDialog(title, items, go_back)
         end
         if dialog then UIManager:setDirty(dialog, "ui") end
     end
-    local in_place_handle = refreshHandle(redrawTicks, true)
+    local in_place_handle = refreshHandle(redrawTicks)
 
     local buttons = {}
     for i = 1, #items do
@@ -3038,6 +2742,9 @@ function Lardo:showMenuDialog(title, items, go_back)
     return dialog
 end
 
+--- What a refresh still has to fetch after the index: only recipes that are
+-- missing or whose updatedAt moved, so one list request is enough to know --
+-- and the stamps mean not one stored recipe has to be opened to work it out.
 function Lardo:pendingSync()
     local todo = {}
     for i = 1, #self.list do
@@ -3105,6 +2812,9 @@ function Lardo:downloadRecipes(todo)
     -- the rest -- which is exactly what it is built to do.
     local in_a_row = 0
     for i = 1, #todo do
+        -- the device went to sleep under us: stop, before drawing the progress
+        -- on the screensaver or blocking on a radio that is going away
+        if wifi_state.sleeping then break end
         local entry = todo[i]
         if os.time() ~= tick then -- at most one redraw (and one dismiss check) a second
             tick = os.time()

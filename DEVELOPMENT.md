@@ -199,13 +199,14 @@ the text file the user edits. Nothing else is written anywhere.
 | `language` | Mealie tag, e.g. `pl-PL`; nil = follow KOReader |
 | `font_size`, `font_face` | the reading font, used by the recipes and the list |
 | `progress_position` | `top` / `bottom` / `side` / `off` |
-| `buttons_position`, `list_buttons_position` | `bottom` / `top` / `off`, one per screen; nil = follow the device |
-| `view_buttons`, `list_buttons` | per button, `false` when it has been turned off |
-| `show_buttons` | what `buttons_position` grew out of; still read when the new key is unset |
 | `sort_by` | `name` / `added` / `updated` / `favorites` |
 | `auto_refresh` | refresh once at KOReader start-up |
-| `keep_awake` | minutes between screensaver nudges while a recipe is open; 0 = off |
-| `status_items` | what the recipe's header corner shows (battery / clock / wifi) |
+| `keep_awake` | keep an open recipe on screen; `false` = off (a number from older versions: 0 = off) |
+| `status_items` | what the recipe's header corner shows (awake / battery / clock / wifi), always in that order |
+
+Settings of features that are gone (`buttons_position`, `view_buttons`, `list_buttons*`,
+`show_buttons`, `own_menu_tab`, `status_order`, `shortcut_dir`) are deleted on the first
+start that finds them (`Lardo:forgetObsoleteSettings`, `Lardo:removeOldShortcut`).
 
 | `lardo_cache.lua` | what it is |
 | --- | --- |
@@ -542,52 +543,25 @@ An entry is KOReader's menu item (`text`, `text_func`, `callback`, `enabled_func
 below, and `title` for what that level is called. The levels are the tables that already
 existed — `getScreenMenuTable`, `getApplicationMenuTable`, `getFontMenuTable`,
 `getConnectionMenuTable`, `getOfflineMenuTable`, `getLanguageMenuTable`,
-`getSortMenuTable`, `getProgressMenuTable`, `getButtonsMenuTable`, `getShortcutMenuTable`.
+`getSortMenuTable`, `getProgressMenuTable`, `getStatusMenuTable`.
+
+In KOReader's menu each level below the top one is built **when it is opened**
+(`sub_item_table_func`), not with the level above: KOReader keeps its menu once built,
+and a level made in advance showed what was true at build time. TouchMenu rebuilds the
+page itself after the callback of an item with a checkmark, so the refresh handle does
+nothing when such a callback calls it synchronously — that was every toggle built twice.
 
 `Lardo:showMenuDialog` is still there, but not as a menu: it is the small choice dialog
-the *Sort* button opens, and the fallback for a KOReader without `SortWidget`. A callback
+for the places that are not KOReader's menu. A callback
 is handed a `refresh` handle that answers both to `on_change()` and to
 `touchmenu_instance:updateItems()` (`refreshHandle`), which is what lets one definition
 serve KOReader's menu and that dialog without either side knowing.
 
-## Arranging things
+## History, continued
 
-`SortWidget` (`ui/widget/sortwidget.lua`) is the widget for "an ordered list you can move
-items in" — KOReader's status bar uses it for the same job. `Lardo:showArrangeDialog(spec)`
-is the one wrapper. The corner of a recipe's header is what is left to arrange (the two
-button rows went in #72); it hands in its definition and a `save(order)`.
-
-**It carries no checkboxes, on purpose.** `SortItemWidget:onTap` toggles only when the tap
-lands inside `checkmark_widget.dimen` — a fingernail-sized square at the left edge; a tap
-anywhere else picks the line up to move it. The first thing anybody says about that is
-"the clock will not switch on". So what is switched on is ticked in the menu, where the
-tick is the whole line, and the window does one job. `item.callback` is called when the checkmark is tapped, `callback` on the widget is
-called with `item_table` already reordered in place, so the whole of our side is building
-the items and writing back the order and the ticks (`Lardo:saveButtonRow`). It is loaded
-through `optionalWidget()`, with a dialog of ticks as the fallback.
-
-The corner was a level of ticks before that, which closed and reopened the dialog on
-every one of them — three changes in a row is three full redraws on e-ink.
-
-**Two interactions, both KOReader's own.** A choice or a switch is a `checked_func` on
-the button — the checkmark KOReader appends after the label, in its menus and in ours —
-and it is redrawn *in place* (`getButtonById` → `setText(getDisplayText())`) so that
-picking from a list does not close and reopen a dialog for a mark after a word. Where the
-order is the reader's as well, it is the arranging window. `showTickDialog`, the fallback
-for a KOReader without `SortWidget`, is the first of those two rather than a third thing.
-
-**Do not hand the arranging window an `on_change` that reopens a dialog.** `SortWidget`
-calls its `callback` from `onReturn`, and when an item is picked up for moving that does
-*not* close the window — so the menu reopens on top of a window that is still there, which
-is what "tapping the tick opens a menu" was. The refresh handle carries `in_place`: true
-for KOReader's menu (still on screen behind us, wants its labels redrawn), false for a
-dialog we replaced (leave it closed).
-
-The order and the on/off are **one** setting in the widgets' eyes:
-`Lardo:getButtonRow(which)` hands `LardoView` and `RecipeBrowser` an array of button ids,
-in the order they are drawn, with the switched-off ones already gone. Both walk that array
-and emit the widget spec for each id. A button added by a later version is appended to a
-saved order rather than dropped, so it appears for everybody.
+(The corner of a recipe's header could be put in order in a `SortWidget` window; that
+went in #79, with the tab and the library shortcut. The corner is drawn in one fixed
+order now, and what it shows is ticked in the menu.)
 
 42. **The Kindle blanks the screen after ten minutes and has no setting for it**
     → *Keep the recipe on screen*, which nudges powerd's t1 timer while a recipe
@@ -962,28 +936,80 @@ saved order rather than dropped, so it appears for everybody.
     is redrawn on the same tick. An older version stored minutes in that
     setting, and any number still reads as "on".
 
-## A tab in KOReader's menu
+77. **"Something drains the battery while the Kindle Keyboard sits on the
+    screensaver."** Two things, neither verified on the device yet:
+    - The keep-awake tick was never unscheduled on `Suspend`. KOReader's own
+      `AutoSuspend` unschedules its timers in `onSuspend` ("we do not want auto
+      suspend procedure to waste battery during suspend") and restarts them in
+      `onResume`; ours went on firing on every wakeup with a recipe open under
+      the screensaver — a rebuild of the whole recipe, a refresh queued under the
+      screensaver, a fake keypress. `Lardo:onSuspend` now unschedules it and
+      `onResume` starts it again if a recipe is still open.
+      `pause_auto_suspend` is left set across the nap: the recipe is still open.
+    - **Wi-Fi stays on in the screensaver on a Kindle.** The generic
+      `Device:onPowerEvent` turns it off on the way into suspend; Kindle has its
+      own `intoScreenSaver`, which does not, so the radio is left to the
+      framework — and a K3 asleep with Wi-Fi on drains fast. "Action when done"
+      only applies when it is set to *turn off*; the default is a prompt, and a
+      "no" (or no answer) left the radio on overnight. Lardo now remembers that
+      a download of its own found the radio off and left it on
+      (`wifi_state.ours`, module-level so it outlives the instance that did it)
+      and calls `NetworkMgr:disableWifi()` from `onSuspend`. A radio that was
+      on before the download is the user's and is left alone, and any
+      `NetworkDisconnected` clears the mark. On a K3 without `liblipclua` that
+      is two `os.execute("lipc-set-prop …")` on the way into suspend — the same
+      thing KOReader itself does there on every other device family.
 
-The row of tabs is `order["KOMenu:menu_buttons"]` in
-`ui/elements/filemanager_menu_order` — a module, so `require` hands every caller the same
-table and a plugin can add to it. A tab is an entry in `menu_items` carrying an `icon`,
-and its contents come from `order[<its id>]`: a list of ids of *other* `menu_items`
-entries. So `installMenuTab` publishes our top-level items one id each
-(`lardo_1`, `lardo_2`, …), lists them under `order.lardo`, and adds `"lardo"` to the row.
-Sub-levels stay nested `sub_item_table`s — only a tab's own contents come from the order.
+78. **A review of the whole plugin** (2026-11-15), every finding fixed:
+    - **A token from a password expired after two days** (Mealie's `TOKEN_TIME`) and
+      every refresh then said "credentials rejected" with the password sitting in
+      `lardo.conf`. `LardoApi:request` now logs in again once on a 401/403 when it has
+      a way to (`api.relogin`, set by `getApi` from `lardo.conf` or from this session's
+      login dialog) and repeats the request. A new `url` without a token of its own
+      drops the old server's token; a file with only a login counts as imported.
+    - **The filter could not find Polish names**: the K3 keyboard has no `ż`, so
+      `zurek` never found *Żurek*. Haystack and filter are folded
+      (`Recipe.foldAccents`).
+    - **`cleanText` ate text**: `<[^<>]->` took "<10 min, potem >5 min" for a tag,
+      `&#322;` (ł) became nothing, and unknown entities vanished. Only things that look
+      like tags are stripped, numeric entities are UTF-8, unknown named ones stay.
+    - **Mealie v2's yield lost its number** (`recipeYieldQuantity`), and was shown only
+      without servings. Both are shown; a v2 step's `summary` goes in front of it.
+    - **`runWhenOnline` dropped requests on a LAN without internet** (its DNS check),
+      the #35 problem for everything else. All of it goes through `runWhenConnected`;
+      opening an out-of-date stored recipe checks the link, not a DNS lookup.
+    - **Asleep mid-sync**: the radio was marked ours only at the end, the progress
+      and the Wi-Fi question were drawn on the screensaver. Ours from the moment it is
+      up, the loop stops on `sleeping`, no question and no summary while asleep.
+    - **`pause_auto_suspend` could stay set** when a new recipe view failed to build,
+      and was cleared even when another plugin had set it.
+    - **A status change re-laid out the whole recipe** (and on the way into suspend);
+      only the header is rebuilt now, unless its height changed. The corner is also
+      redrawn on resume without keep-awake.
+    - **Recipe files were truncated before being written**; a full disk lost the
+      working copy while its stamp said current. Written to `.tmp`, checked, renamed.
+    - **The HTTP total timeout was never enforced** (`ltn12.sink.table`; socketutil's
+      own sink is what enforces it), and a throw from LuaSocket skipped
+      `reset_timeout()`. `socketutil.table_sink`, a `pcall`, `describe_error` when there.
+      A 3xx (a login behind http → https) names the address to use.
+    - Smaller: Down at the end of a chapter jumped back (`scrollLines` clamps where
+      a page turn does not); previous/next used the list as it was when the recipe was
+      opened; paging back built the page twice; every toggle in KOReader's menu built
+      the page twice; sub-levels were built in advance and went stale; warnings were
+      shown under the menu; the Dispatcher titles kept the first language; a BOM,
+      a trailing `# note` or a second `url =` line in `lardo.conf` misread; a font
+      change lost the reading position; a recipe opened online rewrote the whole
+      stamp index with an fsync; `rapidjson` is used when present.
+79. **"There is a lot of code for what it does."** Three features went: Lardo's own
+    tab in KOReader's menu (~290 lines), the library shortcut (~200) and the window
+    for putting the corner in order. The chapter wording is English and Polish only.
+    Their settings are deleted on the first start, and an old `Lardo.lardo` with them.
 
-Five things worth knowing:
+## Lardo in KOReader's menu
 
-- **At the end of the row.** KOReader remembers which tab you had open by *index*
-  (`filemanagermenu_tab_index`); inserting anywhere else moves its own tabs under it.
-- **Switching it off has to undo it**, because that table lives as long as KOReader does.
-- **A menu customiser wins.** `MenuSorter:mergeAndSort` copies
-  `settings/<prefix>_menu_order.lua` over the order *after* every plugin has had its
-  say, so on a device with one the tab cannot be added at all. That is only visible
-  once the menu is built; see history #63 for what we do about it.
-- **`MenuSorter` writes a tab's id into the table it builds for it**, which is how
-  `menuTabIndex` finds ours to open the menu on it.
-- **A tab only exists after a rebuild**, and a rebuild is not free — see below.
+One entry, `menu_items.lardo`, under *Tools → More tools*. (A tab of its own in the row
+of tabs existed until #79; it fought menu customisers and cost a page of code for one
+press saved.)
 
 ### Getting into the menu at all
 
@@ -1003,23 +1029,10 @@ was the one plugin missing from a menu where the others were fine. `sorting_hint
 it is what the orphan pass uses if a customiser's file has replaced `more_tools`, and
 what the customiser itself reads to decide where to file us.
 
-**Two answers, because there are two cases.** The one cause that can be known in
-advance is a menu order file that fixes the row of tabs without us: `tabWouldSurvive`
-reads it, we do not claim a tab we would lose (which would cost the entry under *Tools*
-as well), and the switch is **greyed out** — a switch that can be turned on and then
-does nothing is worse than one that says so. Every other way of losing a tab can only be
-seen afterwards, so if we *did* claim one and the built menu has not got it, that is
-**reported once**, naming the order file if there is one and admitting we cannot name a
-culprit if there is not.
-
-The two must not be confused: the after-the-build check asks `self.tab_claimed`, not
-"is the tab setting on". Asking the setting reported a missing tab on a device where we
-had deliberately never asked for one — a warning, a wasted rebuild and a message about
-something that was working as designed.
-
-**One place at a time.** With the tab on, the id comes *out* of `more_tools`
-(`inMoreTools(order, false)`): with it in both, the sorter puts the contents in whichever
-it finds first and leaves an empty row behind in the other.
+**A menu order file can hide the entry altogether** (`KOMenu:disabled`). That is only
+visible once the menu is built: `showKOReaderMenu` looks for our id in the built menu
+(`menuHasLardo`) and, with an order file there to name, says so once — on top of the
+menu, not under it, where it would be read only after the menu was closed.
 
 ### Rebuilding KOReader's menu (and why it used to die)
 
@@ -1043,7 +1056,8 @@ for a second build, so `rememberMenuItems` keeps a copy of `menu_items` from the
 `dropMenuCache` hands it back. **One level deep is exactly right**: that is the depth the
 sort mutates (it appends a tab's children into the tab's own table), and everything else
 in the copy is overwritten by the build that follows. With no snapshot we do not drop the
-cache at all: a tab that waits for the next start-up beats a menu that cannot be opened.
+cache at all: menus that stay in the old language until the next start-up beat a menu
+that cannot be opened. A language change is the one thing that asks for a rebuild now.
 
 ## The 5-way and the list
 
@@ -1052,48 +1066,13 @@ a long list (every installed font, hundreds of recipes) never leaves the first o
 `RecipeBrowser:onFocusMove` steps onto the neighbouring page at the edges instead, and
 paging back lands on the *last* row rather than the first.
 
-## The library shortcut
+## The library shortcut (removed)
 
-`DocumentRegistry:addAuxProvider{ provider = "lardo", ... }` is how a plugin says it can
-open a file. `FileManager:openFile()` then does `self[provider.provider]:openFile(file)`
-— `self` being the file manager and `provider.provider` our plugin's `name`, which is the
-whole of how a tap on a file in the library reaches `Lardo:openFile`. The "Open with…"
-dialog asks `Lardo:isFileTypeSupported(file)` before offering us.
-
-Three things are worth knowing before touching this:
-
-- **`self.name` is not the provider key.** `FileManager:registerModule(name, module)` sets
-  `self[name] = module` and then overwrites `module.name` with `"filemanager" .. name`
-  (ReaderUI does the same with `"reader"`). Our `init()` runs *inside* the constructor, so
-  registering the provider from `self.name` works — and every later use of it does not:
-  by then the instance is called `filemanagerlardo` and the registry has never heard of
-  it, so the association is quietly never written and the shortcut is a file nobody can
-  see. Hence the `PROVIDER_KEY` constant.
-
-- **The file type is the visibility, and nothing else is.** `FileChooser`'s filter is
-  `file_filter = function(filename) return DocumentRegistry:hasProvider(filename) end` —
-  a **bare name**, not a path, and without `include_aux`. Of the three things
-  `hasProvider` accepts, only the first can answer that:
-
-  1. `filetype_provider[suffix]`, which **only `addProvider(extension, …)` sets**;
-  2. an association by file type, skipped for an auxiliary provider
-     (`if provider and (not provider.order or include_aux)`, and `order` is precisely
-     what makes a provider auxiliary);
-  3. an association for that one file, which lives in its sidecar — and a bare filename
-     cannot be resolved to one.
-
-  `addAuxProvider` alone sets none of them: it says *who we are*, not *what we own*. So
-  `registerProvider` calls both, and `addProvider("lardo", "application/x-lardo", …)` is
-  what puts the shortcut on the screen. Registering an auxiliary provider as a file type
-  is safe: `getFallbackProvider` only ever returns the `txt` one, so we cannot become the
-  opener of last resort, and `openDocument` pcalls `provider.new`, so a cover browser
-  asking our file for a thumbnail gets a log warning rather than a crash.
-- **Register once.** The registry is a module and lives as long as KOReader does, while
-  the plugin is instantiated again for every book opened and closed; without the guard,
-  `DocumentRegistry.providers` grows all session and is walked for every file listed.
-- The shortcut is named `Lardo.lardo`, untranslated: it sits among the books, and the
-  thing it opens is called Lardo in every language.
-- The folder on screen was listed before the file existed, hence the `ui:onRefresh()`.
+Up to #79 Lardo could put `Lardo.lardo` in the library, registered as a file type of an
+auxiliary provider so that a tap on it opened the list. It went with the tab: a second
+door to a place *Start with* and the menu already open. A file left behind by an older
+version is invisible without that file type, so `Lardo:removeOldShortcut` deletes it
+(with its sidecar) from the folder it was put in, once per KOReader run.
 
 ## The Kindle screensaver
 
@@ -1110,14 +1089,19 @@ pressing keys and blanks the screen under it. Two levers exist, and they are not
   nudging and the firmware carries on as before. `autosuspend.koplugin` uses this one,
   every 4 minutes, so KOReader's own sleep timeout can outlive the firmware's.
 
-Lardo uses the second, on its own timer, while a recipe is open — with two rules taken
-from AutoSuspend's version: don't nudge while charging (it causes problems there), and
-the nudge has to come in **before** the firmware's timer is up, not at the same moment,
-so the interval is the one chosen minus thirty seconds.
+Lardo uses neither directly (#75): every four minutes while a recipe is open it fires
+the hook a keypress fires (`UIManager.event_hook:execute("InputEvent")`), and
+AutoSuspend's Kindle branch does the `resetT1Timeout()` with its own guards. Not while
+charging, as AutoSuspend does not either.
 
 `PluginShare.pause_auto_suspend` is set while nudging, which is how a plugin tells
 `autosuspend.koplugin` not to suspend yet (`autoturn.koplugin` does the same). It is
-cleared when the recipe closes.
+cleared when the recipe closes — and only if we set it, since other plugins use the same
+flag — and also when a recipe view is replaced without its close callback.
+
+**The tick stops for sleep.** `onSuspend` unschedules it and `onResume` starts it again
+if a recipe is still open, the way AutoSuspend does with its own timers; nothing of ours
+draws between the two (`wifi_state.sleeping`). See #77 and #78.
 
 ## What has NOT been verified
 
@@ -1126,8 +1110,10 @@ cleared when the recipe closes.
 - **HTTPS and TLS on a Kindle 3.** The code goes through `socket.http` exactly
   like OPDS and wallabag do, but there was no opportunity to test it on hardware.
   On a LAN, plain HTTP is simpler.
-- **Chapter translations** beyond Polish and English (cs, de, es, fr, it, nl, pt,
-  sv are present) — written without a native speaker.
+- **The review fixes of #78 on hardware**: Wi-Fi going off on the way into the
+  screensaver (two `lipc-set-prop` on a K3), the header-only redraw of the corner,
+  `rapidjson` on the legacy Kindle build (with `json` as the fallback), and a refresh
+  interrupted by the power button.
 - **The Wi-Fi hand-back on hardware.** `afterWifiAction()` is called (the tests
   assert that, against a stub); what the Kindle's radio then does, and whether
   "prompt" comes at an awkward moment, has not been seen on a device.

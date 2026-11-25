@@ -8,6 +8,7 @@ function TextBoxWidget:init()
         table.insert(self.lines, line)
     end
     if #self.lines == 0 then self.lines = { "" } end
+    self.vertical_string_list = self.lines
     self.lines_per_page = math.max(1, math.floor((self.height or LINE_HEIGHT) / LINE_HEIGHT))
     self.virtual_line_num = 1
     self.freed = false
@@ -27,8 +28,11 @@ function TextBoxWidget:scrollUp()
 end
 function TextBoxWidget:scrollLines(nb)
     local target = self.virtual_line_num + nb
-    local max = math.max(1, #self.lines - self.lines_per_page + 1)
-    if target < 1 then target = 1 elseif target > max then target = max end
+    -- the real one clamps in this order, so a chapter shorter than a page
+    -- ends up with a first line below 1
+    if target < 1 then target = 1 end
+    local max = #self.lines - self.lines_per_page + 1
+    if target > max then target = max end
     self.virtual_line_num = target
 end
 function TextBoxWidget:scrollToBottom()

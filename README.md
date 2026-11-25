@@ -4,11 +4,11 @@
 
 *Mealie recipes for KOReader.*
 
-A KOReader plugin that reads recipes from a self-hosted [Mealie](https://mealie.io/)
-server on an e-reader. Everything is reachable **both ways**: with a 5-way controller
-and a keyboard (it was built on a Kindle Keyboard, where there is no touch screen at
-all) and with a finger on a touch screen. It can **replace the file browser as
-KOReader's start-up screen**.
+Lardo is a KOReader plugin that downloads recipes from a [Mealie](https://mealie.io/)
+server and shows them on the e-reader. Everything is reachable **both ways**: with a 5-way
+controller and a keyboard (it was built on a Kindle Keyboard, which has no touch screen
+at all) and with a finger. It can **replace the file browser as KOReader's start-up
+screen**.
 
 - Recipe list fetched from `/api/recipes`.
 - A recipe is split into **chapters** — description, ingredients, instructions, notes —
@@ -60,6 +60,9 @@ token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9....
 
 # Instead of a token you can put your login here and use
 # "Log in with username and password" once; the plugin stores the token itself.
+# A token from a password expires (two days on a default Mealie); with these two
+# lines still here it is renewed on its own. A token generated in Mealie does not
+# expire, which makes it the better choice for a device that sits in a kitchen.
 #username = me@example.com
 #password = secret
 
@@ -97,23 +100,6 @@ Two equivalent places:
 KOReader then opens the recipe list straight away. *Menu → Close Lardo* closes the list
 and reveals the normal file browser underneath — the device is still an e-reader.
 
-## A "book" in the library that opens Lardo
-
-Besides *Start with* and the Tools menu, Lardo can put **a file in your library that
-opens it**: *Menu → Application settings → Shortcut in the library* writes
-`Lardo.lardo` into a folder of your choosing (the one you are looking at, unless you
-pick another). Tap it like a book and the recipe list opens. The same entry says where it
-is, moves it — the file follows the folder — and takes it away again.
-
-It is not a trick: KOReader has a mechanism for exactly this — an *auxiliary provider*,
-a plugin that opens a file instead of a document engine, the way its text editor and
-archive viewer do. The file itself holds one line of text that nobody reads; `.lardo` is
-registered as a file type of ours, which is both what sends the tap here and what makes
-the file browser list the file at all (it only shows files it knows an opener for).
-
-A file that came from somewhere else can be pointed at Lardo the usual way: long press →
-*Open with…* → Lardo, and tick "always use for this file".
-
 ## Key and touch reference
 
 ### Recipe list
@@ -132,6 +118,10 @@ A file that came from somewhere else can be pointed at Lardo the usual way: long
 | — | on a touch screen, **a tap on the count at the top** starts the filter |
 | — | and **a tap beside it**, on the empty strip, opens the menu |
 | Back | clear the filter — and nothing else: Lardo is left through its menu |
+
+**The filter ignores Polish letters** (and other accents): the Kindle keyboard has none,
+so `zurek` finds *Żurek* and `salatka` finds *Sałatka*. It searches the name, the
+description and the tags.
 
 The letters are the filter rather than KOReader's item shortcuts (press `Q` to open the
 first row): filtering is worth more than that on a list of recipes, and opening one by
@@ -275,7 +265,6 @@ Connection              ->  Server address: http://mealie.lan:9000
                             Log in · API token: set · Test connection · lardo.conf
 Application settings    ->  Language: Polski
                             Offline: 42 recipes stored
-                            Shortcut in the library: none
                             Open Lardo instead of the file browser at start-up
 ```
 
@@ -288,35 +277,17 @@ an entry that only gives its own name makes you open it to find out where things
 and then close it again, and on a screen that takes half a second to redraw that is the
 whole interaction.
 
-#### A tab of its own
+#### Where Lardo sits in it
 
-*Application settings → **Own tab in KOReader's menu*** puts Lardo in the menu's top row,
-with an icon of its own, and **the menu then opens straight into it** — rather than three
-presses away under *Tools → More tools → Lardo*.
+One entry under *Tools → More tools*, the way contributed plugins usually sit; KOReader's
+row of tabs is left as it is.
 
-It is off to begin with, because that row is KOReader's and a tab is a loud thing to add
-to it uninvited. The row is not hardcoded, though: it is a table (`KOMenu:menu_buttons` in
-`ui/elements/filemanager_menu_order`) that every caller shares, so a plugin can add a tab
-the same way KOReader adds its own. Ours goes at the end, so the tab indices KOReader
-remembers do not shift, and switching it off takes it back out.
-
-**A menu customiser overrules it.** If something on your device writes
+**A menu customiser can hide it.** If something on your device writes
 `settings/filemanager_menu_order.lua` — that is what a menu-customising plugin does —
-KOReader replaces the row of tabs with the saved one *after* every plugin has added its
-entries, so the tab cannot be there. Lardo reads that file before it asks for anything
-and does not claim a tab it cannot keep — which would cost it the entry under *Tools* as
-well. And whenever the tab is asked for and the built menu turns out not to have it,
-Lardo says so once and names the file if there is one, rather than leaving a switch that
-can be turned on and then does nothing. To have the tab on such a device, add Lardo in
-the plugin that decides the menu's layout, or remove what it wrote.
-
-The same file can hide Lardo **altogether**: ids listed in its `KOMenu:disabled` are
-deleted before KOReader sorts the menu, and Lardo's entry and its tab share one id, so
-one line there removes both — nothing in *Tools*, nothing in *More tools*, and ticking
-the tab does nothing either. If that has happened, Lardo says so the first time you open
-the menu and names the file; switch Lardo back on in the plugin that wrote it, or delete
-the file. Meanwhile the recipes are still reachable: *Start with*, and the shortcut in
-the library.
+ids listed in its `KOMenu:disabled` are deleted before KOReader sorts the menu, and then
+Lardo is nowhere in it. If that has happened, Lardo says so the first time you open the
+menu (on top of it) and names the file; switch Lardo back on in the plugin that wrote it,
+or delete the file. Meanwhile the recipes are still reachable through *Start with*.
 
 Entries that need a screen of ours are **disabled rather than missing** — *Back to the
 list* is there and grey until there is a list to go back to. A menu whose entries move
@@ -361,9 +332,9 @@ a recipe is open.
 
 The right hand end of a recipe's header shows its cooking time, and after it whatever of
 the device's own state you ask for: **awake** (whether the screen is being kept on) and
-the **battery**, both by default, the **clock**, and whether **Wi-Fi** is on. *Status in
-the corner* is where they are ticked — the whole line is the target — and *Order…* opens
-a window to **drag them into the order you want**:
+the **battery**, both by default, the **clock**, and whether **Wi-Fi** is on, always in
+that order. *Status in the corner* is where they are ticked — the whole line is the
+target:
 
 ```
 Spaghetti Carbonara                45 min   A  75%
@@ -381,9 +352,10 @@ and the screen will blank on the device's own schedule. Switching *Keep the reci
 screen* on brings the letter with it, so there is always something on screen to say that
 it is; take the letter away afterwards and it stays away, whatever interval you pick.
 
-The battery and the clock are refreshed on the same timer as above, so with *Keep the
-recipe on screen* switched off they say what was true when the recipe was opened. **WiFi
-does not wait for that**: KOReader says when the radio goes up or down, and the corner
+The battery and the clock are refreshed on the same timer as above, and when the device
+wakes up; with *Keep the recipe on screen* switched off they say what was true when the
+recipe was opened or last woken. Only the header is redrawn for it — the recipe's text
+below is not laid out again. **WiFi does not wait for that**: KOReader says when the radio goes up or down, and the corner
 follows it — a refresh that hangs the radio up afterwards would otherwise leave the mark
 sitting there for another ten minutes.
 
@@ -419,7 +391,7 @@ The setting drives three things:
 | | |
 | --- | --- |
 | `Accept-Language` sent to Mealie | so the server answers in that language |
-| the chapter names | wording for cs, de, en, es, fr, it, nl, pl, pt, sv |
+| the chapter names | English and **Polish** |
 | **the plugin's own menus and messages** | English and **Polish** |
 
 KOReader's own gettext only knows the strings that ship with KOReader, so the plugin
@@ -428,11 +400,11 @@ carries its interface translations itself, in
 with Polish plural forms (1 / 2–4 / 5+). Anything missing from it falls back to
 KOReader's translations and then to English, so a partial translation is fine.
 
-**The menu offers only English and Polish**, because those are the two the interface is
-translated into; the chapter wording for the other languages is still used when
-KOReader itself runs in one of them. Adding a language means a block in
-[`lardolang.lua`](lardo.koplugin/lardolang.lua) (chapter names), optionally one in
-`lardoi18n.lua` (the interface), and its code in `CHOICES`.
+**The plugin speaks English and Polish.** With KOReader in any other language, that
+language is still sent to Mealie ("follow KOReader"), and the chapter names fall back to
+KOReader's own translation of the English ones. Adding a language means a block in
+[`lardolang.lua`](lardo.koplugin/lardolang.lua) (chapter names) plus a line in its
+`LANGUAGES`, and optionally one in `lardoi18n.lua` (the interface).
 
 ## Offline use and incremental sync
 
@@ -500,17 +472,26 @@ KOReader starts, instead of waiting for you to open the list.
 
 KOReader has two settings of its own for this (*Network → Action when Wi-Fi is needed* /
 **when done**). Bringing the connection up was always KOReader's business; hanging it up
-is not automatic — `NetworkMgr:runWhenOnline()` only connects, and the "when done"
+is not automatic — bringing it up only connects, and the "when done"
 setting is acted on by `afterWifiAction()`, which the plugin has to call. It now does,
 at the end of every download **including a failed one**, so "turn Wi-Fi off when done"
 finally does what it says.
 
-*Test connection* takes the other of KOReader's two doors: `runWhenConnected()` rather
-than `runWhenOnline()`. The second one decides with a DNS lookup of its own and, when the
-radio is up but that lookup fails, drops the callback without saying anything — which for
-a button whose whole job is to report whether the server answers is the one outcome that
-helps nobody. `runWhenConnected()` needs the link, brings it up the same way, and
-guarantees the answer: either the recipe count, or the reason there is none.
+A Kindle does not turn Wi-Fi off when it goes to sleep (KOReader only does that on other
+devices), and a Kindle Keyboard asleep with the radio on loses its battery in days. So if
+a download switched Wi-Fi on and it is **still on when the screensaver comes up** —
+because "when done" is set to leave it on, or its question was answered "no" or not at
+all — Lardo turns it off then. Wi-Fi that was already on before the download is left
+alone. That holds for "leave it on" too: KOReader itself turns Wi-Fi off for sleep on
+every other kind of device, whatever that setting says.
+
+Everything goes through `runWhenConnected()`, not `runWhenOnline()`. The second one
+decides with a DNS lookup of a host on the internet and, when the radio is up but that
+lookup fails — a Mealie on the home network with no internet, or behind a DNS filter —
+drops the request without saying anything. `runWhenConnected()` needs the link, brings
+it up the same way, and guarantees an answer: the server's, or the reason there is none.
+Opening a stored but out-of-date recipe checks only that the link is up, too, rather than
+a DNS lookup on every open.
 
 ### Falling asleep
 
@@ -529,12 +510,18 @@ Two smaller things in the same corner:
   subclasses. The file browser is always open underneath Lardo, and without that flag
   `UIManager` painted it first on every full repaint — including the one after the
   screensaver goes away.
-- A download that loses the network mid-sync (the usual reason for which is the device
-  falling asleep) **stops after three failures in a row** instead of working through what
-  is left. Each of those requests blocks for LuaSocket's timeouts — 10 s per read, 30 s
-  in total — with all of KOReader waiting on it, so forty recipes were forty chances to
-  freeze the device for half a minute. Whatever arrived is kept, and the next refresh
-  fetches the rest.
+- **A refresh that is running when the device falls asleep stops** at the next recipe:
+  nothing is drawn on the screensaver, no "turn Wi-Fi off?" question waits there all
+  night, and the radio goes off with the device (see Wi-Fi above). Whatever arrived is
+  kept, and the next refresh fetches the rest. A recipe that was loading is stored and
+  not opened over the screensaver.
+- A download that loses the network mid-sync for any other reason **stops after three
+  failures in a row** instead of working through what is left. Each of those requests blocks for LuaSocket's timeouts — 10 s per read, 30 s
+  in total, now enforced as a total — with all of KOReader waiting on it, so forty
+  recipes were forty chances to freeze the device for half a minute. Whatever arrived is
+  kept, and the next refresh fetches the rest.
+- **Each recipe is written to a file of its own first** and only then put in place of the
+  old one, so a full disk costs the update, not the copy you cook from offline.
 
 ## Tests
 

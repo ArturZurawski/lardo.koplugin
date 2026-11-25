@@ -429,6 +429,7 @@ function LardoView:buildLayout()
     table.insert(header_group, LineWidget:new{
         dimen = Geom:new{ w = screen_w, h = Size.line.thin },
     })
+    self.header_group = header_group
     local header_h = header_group:getSize().h
     -- everything above the text is chrome, and a tap up there is the menu
     -- rather than a page turn
@@ -526,9 +527,28 @@ function LardoView:setStatus(text)
     text = text or ""
     if text == self.status_text then return end
     self.status_text = text
-    -- The title is laid out against whatever is in the corner, so this is a
-    -- rebuild rather than a setText -- and on the device it is the one repaint
-    -- every few minutes that says the screen is still ours.
+    -- The title is laid out against whatever is in the corner, so the header
+    -- is built again -- but only the header: the recipe's text below it does
+    -- not move, and re-wrapping a whole chapter on a K3 to move a clock by four
+    -- minutes is the expensive half of a refresh nobody asked for.
+    local header_group = self.header_group
+    local old = header_group and header_group[1]
+    if old then
+        local old_h = old:getSize().h
+        local new = self:buildHeader(self.dimen.w, Size.padding.large)
+        if new:getSize().h == old_h then
+            header_group[1] = new
+            if header_group.resetLayout then header_group:resetLayout() end
+            old:free()
+            UIManager:setDirty(self, function()
+                return "ui", Geom:new{ x = self.dimen.x or 0, y = self.dimen.y or 0,
+                    w = self.dimen.w, h = old_h }
+            end)
+            return
+        end
+        new:free()
+    end
+    -- a corner that changed the header's height moves the text: all of it
     self:rebuild(self.text_widget and self.text_widget.virtual_line_num or nil)
 end
 
@@ -550,6 +570,23 @@ function LardoView:rebuild(scroll_to)
         self.text_widget:scrollToBottom()
     elseif type(scroll_to) == "number" and scroll_to > 1 then
         self.text_widget:scrollLines(scroll_to - self.text_widget.virtual_line_num)
+    end
+    self:refresh()
+end
+
+--- Rebuilds for a new font or size, staying where the reader was: line 40 of
+-- the old layout is not line 40 of a bigger font, but the same share of the
+-- chapter is the same place in the recipe.
+function LardoView:rebuildKeepingPlace()
+    local low = 0
+    if self.text_widget and self.text_widget.getVisibleHeightRatios then
+        low = self.text_widget:getVisibleHeightRatios() or 0
+    end
+    self:buildLayout()
+    local total = self.text_widget.vertical_string_list and #self.text_widget.vertical_string_list
+    local line = total and math.floor(low * total) + 1 or 1
+    if line > 1 then
+        self.text_widget:scrollLines(line - self.text_widget.virtual_line_num)
     end
     self:refresh()
 end
@@ -586,9 +623,19 @@ function LardoView:onLardoScrollPage(direction)
 end
 
 function LardoView:onLardoScrollLine(direction)
-    local before = self.text_widget.virtual_line_num
-    self.text_widget:scrollLines(direction)
-    if self.text_widget.virtual_line_num ~= before then
+    local text = self.text_widget
+    local before = text.virtual_line_num
+    local total = text.vertical_string_list and #text.vertical_string_list
+    -- TextBoxWidget:scrollLines() clamps to "the last line at the bottom of the
+    -- page", which a page turn does not: after PgDown into a short last page,
+    -- Down would jump *back*, and in a chapter shorter than a page it would
+    -- set a negative first line. With the last line on screen, Down is done.
+    if direction > 0 and total and before + text.lines_per_page > total then
+        return true
+    end
+    if direction < 0 and before <= 1 then return true end
+    text:scrollLines(direction)
+    if text.virtual_line_num ~= before then
         self:refresh()
     end
     return true

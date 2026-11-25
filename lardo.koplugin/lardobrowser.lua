@@ -499,8 +499,11 @@ function RecipeBrowser:onFocusMove(args)
             self:onGotoPage(self.page + 1) -- lands on the first item
             return true
         elseif dy < 0 and self.selected.y <= 1 and self.page > 1 then
-            self:onGotoPage(self.page - 1)
-            self:updateItems(#self.layout, true) -- ...and here on the last one
+            -- straight to the last row: onGotoPage() would build the page
+            -- once for its first row and we would build it again
+            self.prev_itemnumber = nil
+            self.page = self.page - 1
+            self:updateItems(self.perpage, true) -- ...and here on the last one
             return true
         end
     end

@@ -6,9 +6,10 @@ response from the request's Accept-Language header
 (mealie/middleware/locale_context.py). So the language is one setting on our
 side, sent to the server *and* used for the chapter titles below.
 
-Adding a language is a matter of copying the `en` block and translating the
-values; the keys must stay as they are. Unknown languages fall back to
-KOReader's own translation of the English wording.
+English and Polish only. Adding a language is a matter of copying the `en`
+block and translating the values, plus a line in LANGUAGES; the keys must stay
+as they are. Unknown languages fall back to KOReader's own translation of the
+English wording.
 
 @module koplugin.lardo.lang
 --]]
@@ -42,91 +43,25 @@ local STRINGS = {
         cook = "Gotowanie", categories = "Kategorie", tags = "Tagi", source = "Źródło",
         empty = "Ten przepis nie ma treści.",
     },
-    de = {
-        description = "Beschreibung", ingredients = "Zutaten", instructions = "Zubereitung", notes = "Notizen",
-        servings = "Portionen", recipe_yield = "Ergibt", total = "Gesamt", prep = "Vorbereitung",
-        cook = "Kochen", categories = "Kategorien", tags = "Schlagwörter", source = "Quelle",
-        empty = "Dieses Rezept hat keinen Inhalt.",
-    },
-    fr = {
-        description = "Description", ingredients = "Ingrédients", instructions = "Préparation", notes = "Notes",
-        servings = "Portions", recipe_yield = "Rendement", total = "Total", prep = "Préparation",
-        cook = "Cuisson", categories = "Catégories", tags = "Étiquettes", source = "Source",
-        empty = "Cette recette n'a pas de contenu.",
-    },
-    es = {
-        description = "Descripción", ingredients = "Ingredientes", instructions = "Preparación", notes = "Notas",
-        servings = "Raciones", recipe_yield = "Rendimiento", total = "Total", prep = "Preparación",
-        cook = "Cocción", categories = "Categorías", tags = "Etiquetas", source = "Fuente",
-        empty = "Esta receta no tiene contenido.",
-    },
-    it = {
-        description = "Descrizione", ingredients = "Ingredienti", instructions = "Preparazione", notes = "Note",
-        servings = "Porzioni", recipe_yield = "Resa", total = "Totale", prep = "Preparazione",
-        cook = "Cottura", categories = "Categorie", tags = "Tag", source = "Fonte",
-        empty = "Questa ricetta non ha contenuto.",
-    },
-    nl = {
-        description = "Beschrijving", ingredients = "Ingrediënten", instructions = "Bereiding", notes = "Notities",
-        servings = "Porties", recipe_yield = "Opbrengst", total = "Totaal", prep = "Voorbereiding",
-        cook = "Koken", categories = "Categorieën", tags = "Labels", source = "Bron",
-        empty = "Dit recept heeft geen inhoud.",
-    },
-    cs = {
-        description = "Popis", ingredients = "Suroviny", instructions = "Postup", notes = "Poznámky",
-        servings = "Porce", recipe_yield = "Výtěžnost", total = "Celkem", prep = "Příprava",
-        cook = "Vaření", categories = "Kategorie", tags = "Štítky", source = "Zdroj",
-        empty = "Tento recept nemá žádný obsah.",
-    },
-    pt = {
-        description = "Descrição", ingredients = "Ingredientes", instructions = "Modo de preparo", notes = "Notas",
-        servings = "Porções", recipe_yield = "Rendimento", total = "Total", prep = "Preparo",
-        cook = "Cozimento", categories = "Categorias", tags = "Etiquetas", source = "Fonte",
-        empty = "Esta receita não tem conteúdo.",
-    },
-    sv = {
-        description = "Beskrivning", ingredients = "Ingredienser", instructions = "Gör så här", notes = "Anteckningar",
-        servings = "Portioner", recipe_yield = "Ger", total = "Totalt", prep = "Förberedelse",
-        cook = "Tillagning", categories = "Kategorier", tags = "Etiketter", source = "Källa",
-        empty = "Det här receptet har inget innehåll.",
-    },
 }
 
---- Endonyms for the settings menu, and the full tag we send to Mealie
--- (its translation files are named pl-PL.json, pt-BR.json and so on).
+--- The languages there is wording for: endonyms for the settings menu, and
+-- the full tag we send to Mealie (its translation files are named pl-PL.json
+-- and so on). Any other language KOReader runs in is still sent to Mealie
+-- ("Follow KOReader"); our own chapter titles then fall back to KOReader's
+-- translation of the English ones.
 local LANGUAGES = {
-    { "cs", "cs-CZ", "Čeština" },
-    { "de", "de-DE", "Deutsch" },
     { "en", "en-US", "English" },
-    { "es", "es-ES", "Español" },
-    { "fr", "fr-FR", "Français" },
-    { "it", "it-IT", "Italiano" },
-    { "nl", "nl-NL", "Nederlands" },
     { "pl", "pl-PL", "Polski" },
-    { "pt", "pt-BR", "Português" },
-    { "sv", "sv-SE", "Svenska" },
 }
-
---- What the settings menu offers. The other languages above are still used
--- when KOReader itself runs in one of them ("Follow KOReader"), but the plugin
--- is only *translated* into these two, so these are the only ones worth picking.
-local CHOICES = { "en", "pl" }
 
 LardoLang.ENGLISH = ENGLISH
 LardoLang.STRINGS = STRINGS
 LardoLang.LANGUAGES = LANGUAGES
 
---- The entries of LANGUAGES that the menu offers, in its order.
+--- What the settings menu offers.
 function LardoLang.choices()
-    local out = {}
-    for i = 1, #CHOICES do
-        for j = 1, #LANGUAGES do
-            if LANGUAGES[j][1] == CHOICES[i] then
-                table.insert(out, LANGUAGES[j])
-            end
-        end
-    end
-    return out
+    return LANGUAGES
 end
 
 local current = nil -- nil = fall back to KOReader's own translations

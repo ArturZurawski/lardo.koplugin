@@ -30,10 +30,6 @@ local PL = {
     ["The menu could not be opened.\n\n%1"] = "Nie udało się otworzyć menu.\n\n%1",
     ["Lardo is missing from KOReader's menu.\n\nA menu order file leaves it out:\n%1\n\nSwitch Lardo back on in the plugin that wrote it, or delete the file."] =
         "Brakuje Lardo w menu KOReadera.\n\nPomija je plik z kolejnością menu:\n%1\n\nWłącz Lardo z powrotem we wtyczce, która go zapisała, albo skasuj ten plik.",
-    ["Lardo's own tab could not be added to KOReader's menu.\n\nIts layout is fixed by:\n%1\n\nLardo is under Tools instead."] =
-        "Nie udało się dodać własnej zakładki Lardo do menu KOReadera.\n\nJego układ ustala:\n%1\n\nLardo jest zamiast tego w Narzędziach.",
-    ["Lardo's own tab could not be added to KOReader's menu: something else on this device decides how it is laid out.\n\nLardo is under Tools instead."] =
-        "Nie udało się dodać własnej zakładki Lardo do menu KOReadera: o jego układzie decyduje na tym urządzeniu coś innego.\n\nLardo jest zamiast tego w Narzędziach.",
     ["This KOReader version does not open its menu on request."] =
         "Ta wersja KOReadera nie otwiera swojego menu na żądanie.",
     ["never"] = "nigdy",
@@ -42,20 +38,9 @@ local PL = {
     ["Fonts: %1 pt, %2"] = "Czcionki: %1 pt, %2",
     ["Fonts"] = "Czcionki",
     ["Size: %1"] = "Rozmiar: %1",
-    ["Order…"] = "Kolejność…",
-    ["Drag them into the order the corner draws them in."] =
-        "Przeciągnij je w kolejność, w jakiej rysuje je róg.",
-    ["This KOReader version cannot reorder them."] =
-        "Ta wersja KOReadera nie umie zmieniać ich kolejności.",
     ["Connection"] = "Połączenie",
     ["Screen"] = "Ekran",
     ["Application settings"] = "Ustawienia aplikacji",
-    ["Shortcut in the library"] = "Skrót w bibliotece",
-    ["Folder: %1"] = "Folder: %1",
-    ["Put the shortcut there"] = "Połóż tam skrót",
-    ["Remove the shortcut"] = "Usuń skrót",
-    ["Removed from the library:\n%1"] = "Usunięto z biblioteki:\n%1",
-    ["This KOReader version has no folder picker."] = "Ta wersja KOReadera nie ma wyboru folderu.",
     ["Offline"] = "Offline",
     ["Language"] = "Język",
     ["Fetches the list, and with it every recipe that is new or has changed, so everything is readable without WiFi afterwards."] =
@@ -63,16 +48,6 @@ local PL = {
     ["not set"] = "nie ustawiono",
     ["Language: %1"] = "Język: %1",
     ["Follow KOReader (%1)"] = "Za KOReaderem (%1)",
-    ["Shortcut in the library: %1"] = "Skrót w bibliotece: %1",
-    ["Puts a file in the library that opens Lardo when it is tapped, for getting here without the menu."] =
-        "Kładzie w bibliotece plik, który po dotknięciu otwiera Lardo — żeby dostać się tu bez menu.",
-    ["Opening this in KOReader opens Lardo.\n"] = "Otwarcie tego w KOReaderze otwiera Lardo.\n",
-    ["Added to the library:\n%1\n\nOpening it opens Lardo."] =
-        "Dodano do biblioteki:\n%1\n\nOtwarcie tego otwiera Lardo.",
-    ["Could not write the shortcut:\n%1"] = "Nie udało się zapisać skrótu:\n%1",
-    ["Own tab in KOReader's menu"] = "Własna zakładka w menu KOReadera",
-    ["Puts Lardo in the menu's top row, with an icon of its own, and opens the menu straight into it. Off means one entry under Tools, the way plugins usually sit. A plugin that customises the menu can make the tab impossible; Lardo then stays under Tools."] =
-        "Umieszcza Lardo w górnym rzędzie menu, z własną ikoną, i otwiera menu od razu na niej. Wyłączone oznacza jeden wpis w Narzędziach, tak jak zwykle siedzą wtyczki. Wtyczka przestawiająca menu może uniemożliwić zakładkę; Lardo zostaje wtedy w Narzędziach.",
     ["Open Lardo instead of the file browser at start-up"] =
         "Otwieraj Lardo zamiast menedżera plików przy starcie",
 
@@ -194,8 +169,6 @@ local PL = {
     ["Could not write the configuration file:\n%1"] =
         "Nie udało się zapisać pliku konfiguracyjnego:\n%1",
     ["Loaded settings from:\n%1"] = "Wczytano ustawienia z:\n%1",
-    ["Read %1, but it contains no server address or token."] =
-        "Odczytano %1, ale nie ma w nim adresu serwera ani tokenu.",
     ["Saved to:\n%1"] = "Zapisano w:\n%1",
     ["Lardo is not set up yet.\n\nPut your server address and API token into:\n%1"] =
         "Lardo nie jest jeszcze skonfigurowane.\n\nWpisz adres serwera i token API do:\n%1",
@@ -213,6 +186,10 @@ local PL = {
     ["Could not open the recipe view.\n\n%1"] = "Nie udało się otworzyć widoku przepisu.\n\n%1",
     ["Mealie server address is not set."] = "Adres serwera Mealie nie jest ustawiony.",
     ["Could not reach the Mealie server.\n%1"] = "Nie można połączyć się z serwerem Mealie.\n%1",
+    ["Read %1, but it contains no server address, token or login."] =
+        "Odczytano %1, ale nie ma w nim adresu serwera, tokenu ani loginu.",
+    ["The Mealie server moved to another address:\n%1\nPut that address in the settings."] =
+        "Serwer Mealie przeniósł się pod inny adres:\n%1\nWpisz ten adres w ustawieniach.",
     ["Mealie rejected the credentials. Check the token, or log in again."] =
         "Mealie odrzuciło dane logowania. Sprawdź token albo zaloguj się ponownie.",
     ["Not found on the Mealie server. Check the server address."] =

@@ -11,7 +11,15 @@ Only the read-only endpoints we need are implemented:
 @module koplugin.lardo.api
 --]]
 
-local JSON = require("json")
+-- rapidjson is C and ships with KOReader (the exporter plugin uses it); the
+-- pure-Lua json module is the fallback. A page of a hundred recipe summaries is
+-- the biggest thing a K3 decodes here, and the difference is seconds. Its null
+-- is not a table, string or number, which is all this plugin ever looks for.
+local JSON
+do
+    local ok, rapidjson = pcall(require, "rapidjson")
+    JSON = (ok and type(rapidjson) == "table" and rapidjson.decode) and rapidjson or require("json")
+end
 local http = require("socket.http")
 local logger = require("logger")
 local ltn12 = require("ltn12")
@@ -60,8 +68,25 @@ function LardoApi:hasToken()
 end
 
 --- Performs a request and decodes the JSON body.
--- @return table decoded body, or nil plus a human readable error message
+-- When the server rejects the token and `self.relogin` is set (credentials from
+-- lardo.conf), logs in again once and repeats the request: a token obtained
+-- with a password expires (Mealie's TOKEN_TIME, 48 h by default), and the
+-- password is right there.
+-- @return table decoded body, or nil plus a human readable error message and,
+--   for a rejected token, the string "auth"
 function LardoApi:request(method, path, opts)
+    local data, err, kind = self:requestOnce(method, path, opts)
+    if kind == "auth" and self.relogin and not (opts and opts.with_token == false) then
+        local token = self.relogin()
+        if token then
+            self.token = token
+            data, err, kind = self:requestOnce(method, path, opts)
+        end
+    end
+    return data, err, kind
+end
+
+function LardoApi:requestOnce(method, path, opts)
     opts = opts or {}
     local base = self:getBaseUrl()
     if not base then
@@ -97,28 +122,50 @@ function LardoApi:request(method, path, opts)
     end
 
     local sink = {}
-    socketutil:set_timeout(opts.block_timeout or socketutil.LARGE_BLOCK_TIMEOUT,
-                           opts.total_timeout or socketutil.LARGE_TOTAL_TIMEOUT)
+    local block_timeout, total_timeout = socketutil:set_timeout(
+        opts.block_timeout or socketutil.LARGE_BLOCK_TIMEOUT,
+        opts.total_timeout or socketutil.LARGE_TOTAL_TIMEOUT)
     logger.dbg("Lardo: request", method or "GET", url)
-    local code, _resp_headers, status = socket.skip(1, http.request{
-        url = url,
-        method = method or "GET",
-        headers = headers,
-        source = source,
-        sink = ltn12.sink.table(sink),
-    })
+    -- socketutil's sink is the only thing that enforces the *total* timeout:
+    -- the socket's own restarts on every chunk, so a link that trickles (Wi-Fi
+    -- on its way to sleep) could otherwise hold the UI for minutes. The pcall
+    -- makes sure the timeouts are put back whatever LuaSocket throws.
+    local ok, code, resp_headers, status = pcall(function()
+        return socket.skip(1, http.request{
+            url = url,
+            method = method or "GET",
+            headers = headers,
+            source = source,
+            sink = socketutil.table_sink and socketutil.table_sink(sink) or ltn12.sink.table(sink),
+        })
+    end)
     socketutil:reset_timeout()
+    if not ok then
+        logger.warn("Lardo: request failed", code)
+        return nil, T(_("Could not reach the Mealie server.\n%1"), tostring(code))
+    end
 
     if type(code) ~= "number" then
         -- LuaSocket puts the failure reason in the first return value here.
         logger.warn("Lardo: network error", code, status)
-        return nil, T(_("Could not reach the Mealie server.\n%1"), tostring(code or status or "?"))
+        local described = socketutil.describe_error
+            and socketutil.describe_error(code, block_timeout, total_timeout)
+        return nil, T(_("Could not reach the Mealie server.\n%1"), described or tostring(code or status or "?"))
     end
 
     if code == 401 or code == 403 then
-        return nil, _("Mealie rejected the credentials. Check the token, or log in again.")
+        return nil, _("Mealie rejected the credentials. Check the token, or log in again."), "auth"
     elseif code == 404 then
         return nil, _("Not found on the Mealie server. Check the server address.")
+    elseif code >= 300 and code < 400 then
+        -- LuaSocket follows redirects for GET only, and never with a body: a
+        -- login behind an http -> https redirect ends up here
+        local location = type(resp_headers) == "table" and resp_headers.location
+        if location then
+            return nil, T(_("The Mealie server moved to another address:\n%1\nPut that address in the settings."),
+                (tostring(location):gsub("/api/.*$", "")))
+        end
+        return nil, T(_("Mealie server returned an error: %1"), tostring(status or code))
     elseif code < 200 or code > 299 then
         return nil, T(_("Mealie server returned an error: %1"), tostring(status or code))
     end
@@ -127,8 +174,8 @@ function LardoApi:request(method, path, opts)
     if content == "" then
         return nil, _("Mealie server returned an empty response.")
     end
-    local ok, result = pcall(JSON.decode, content)
-    if not ok or type(result) ~= "table" then
+    local decoded_ok, result = pcall(JSON.decode, content)
+    if not decoded_ok or type(result) ~= "table" then
         logger.warn("Lardo: invalid JSON", content:sub(1, 200))
         return nil, _("Mealie server returned a response that is not valid JSON.\nIs the server address correct?")
     end

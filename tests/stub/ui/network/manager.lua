@@ -19,4 +19,11 @@ function NetworkMgr:afterWifiAction(cb)
     self.after_action_count = self.after_action_count + 1
     if cb then cb() end
 end
+-- KOReader hangs the radio up with this; it broadcasts NetworkDisconnected
+-- when done, which a test does by hand
+NetworkMgr.disable_count = 0
+function NetworkMgr:disableWifi()
+    self.disable_count = self.disable_count + 1
+    self.wifi_on = false
+end
 return NetworkMgr
